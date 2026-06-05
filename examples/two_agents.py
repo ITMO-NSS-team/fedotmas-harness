@@ -5,8 +5,10 @@ from pydantic_ai import Agent as PydanticAgent
 
 load_dotenv()
 
+MODEL = "openai:gpt-oss-20b"
+
 researcher = PydanticAgent(
-    "openai:gpt-4o-mini",
+    MODEL,
     system_prompt="Given a topic, return 3 concise bullet points with the key facts.",
 )
 
@@ -18,7 +20,7 @@ def word_count(text: str) -> int:
 
 
 writer = LangChainAgent(
-    model="openai:gpt-4o-mini",
+    model=MODEL,
     tools=[word_count],
     system_prompt="Turn the bullet points into one tight paragraph, then report its word count.",
 )
@@ -29,5 +31,5 @@ if __name__ == "__main__":
     research = researcher.run_sync(topic)
     print(research)
 
-    result = writer.invoke({"messages": [("user", research)]})
+    result = writer.invoke({"messages": [("user", research.output)]})
     print(result["messages"][-1].content)

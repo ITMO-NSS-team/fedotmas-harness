@@ -28,5 +28,6 @@ dev = [
 ]
 examples = [
   "langchain>=1.3.4",
-  "pydantic-ai-slim>=1.106",
+  "langchain-openai>=1.2.2",
+  "pydantic-ai-slim[openai]>=1.106",
 ]
