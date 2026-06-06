@@ -1,1 +1,1 @@
-"""Reliability logick. Retries, fallbacks, routing"""
+"""Reliability middleware over agent invoke."""

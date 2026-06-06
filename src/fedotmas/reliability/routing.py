@@ -1,1 +1,1 @@
-"""LLM Routing: https://arxiv.org/pdf/2601.02695"""
+"""LLM routing. Ref: arxiv 2601.02695."""
