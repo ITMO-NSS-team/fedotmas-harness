@@ -24,8 +24,7 @@ def generate_trigger(view: View) -> bool:
 
 async def critique(input: object, view: View) -> Result:
     n = view.count("draft:*")
-    draft = view.get(f"draft:{n}")
-    approved = draft.value["quality"] >= THRESHOLD  # type: ignore
+    approved = view.value(f"draft:{n}")["quality"] >= THRESHOLD
     return Result(
         payload=approved,
         writes=[Fact(tag=f"verdict:{n}", value={"approved": approved})],

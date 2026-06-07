@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 from fedotmas.engine.contract import Fact, View
 
@@ -23,6 +24,10 @@ class Snapshot:
     def get(self, tag: str) -> Fact | None:
         found = self.query(tag)
         return found[-1] if found else None
+
+    def value(self, tag: str) -> Any:
+        f = self.get(tag)
+        return f.value if f else None
 
     def exists(self, pattern: str) -> bool:
         return any(_match(f.tag, pattern) for f in self._facts)
