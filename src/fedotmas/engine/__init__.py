@@ -1,1 +1,1 @@
-"""Core engine: blackboard store and superstep executors."""
+"""Core engine: blackboard store and the reactive superstep executor."""

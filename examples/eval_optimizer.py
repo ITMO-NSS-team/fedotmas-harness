@@ -1,10 +1,10 @@
-"""Evaluator-Optimizer on the EventExecutor with deterministic stub agents."""
+"""Evaluator-Optimizer on the ReactiveExecutor with deterministic stub agents."""
 
 import asyncio
 
 from fedotmas.adapters import as_agent
 from fedotmas.engine.contract import Fact, Result, View
-from fedotmas.engine.executors.event import EventExecutor
+from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
 from fedotmas.engine.terminate import Budget, Goal
@@ -49,17 +49,18 @@ async def main() -> None:
         critique, name="critic", reads="draft:*", trigger=critique_trigger
     )
     system = System(agents=[generator, critic])
-    run = await EventExecutor().run(
+    store = Store()
+    stream = ReactiveExecutor().stream(
         system,
-        Store(),
+        store,
         seed=[Fact(tag="task", value="write a haiku")],
         terminate=Goal(approved) | Budget(max_steps=8),
     )
-    for report in run.steps:
+    async for report in stream:
         print(
             f"step {report.step}: fired={report.fired} writes={[f.tag for f in report.writes]}"
         )
-    print("approved:", approved(run.view))
+    print("approved:", approved(store.snapshot()))
 
 
 if __name__ == "__main__":
