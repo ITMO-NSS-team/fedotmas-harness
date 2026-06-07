@@ -1,0 +1,503 @@
+# Engine
+
+The engine is the part of fedotmas that actually runs a multi-agent system. It has no
+notion of graphs, prompts, or LLMs. It knows three things: a shared store of facts, a set
+of agents that read and write those facts, and a loop that decides who runs next.
+
+Everything else in the framework (the DSL, the pattern presets) is a way to produce input
+for this engine. If you understand the engine, you understand the runtime.
+
+## The mental model
+
+There is one shared place where state lives, called the **Store**. State is a growing list
+of **facts**. A fact is a tagged value, like `draft:1 = {...}` or `topic = "witcher"`.
+
+Agents do not call each other. Each agent watches the store and declares "I am ready when
+the store looks like this". The engine runs in rounds. In each round it takes a single
+snapshot of the store, asks every agent whether it is ready, runs the ready ones at the
+same time, and then writes all of their new facts back into the store. Then it takes a new
+snapshot and repeats.
+
+That round is called a **superstep** (the model is BSP, bulk-synchronous parallel). The
+key consequence: agents that run together in one superstep all see the same snapshot, and
+none of them sees what the others wrote until the next superstep. State only moves forward
+at the boundary between supersteps.
+
+This is the whole engine. The rest of this page is the pieces that make it concrete.
+
+## A first run
+
+Three agents in a chain. The researcher waits for a `topic`, the writer waits for
+`research`, the editor waits for a `draft`. Nobody wires them together. Each just declares
+what it reads, and the data dependency creates the order.
+
+```python
+import asyncio
+
+from fedotmas.adapters import as_agent
+from fedotmas.engine.contract import Fact, Result, View
+from fedotmas.engine.executor import ReactiveExecutor
+from fedotmas.engine.store import Store
+from fedotmas.engine.system import System
+from fedotmas.engine.terminate import Goal
+
+
+async def research(input: object, view: View) -> Result:
+    return Result(writes=[Fact(tag="research", value="raw facts")])
+
+
+async def write(input: object, view: View) -> Result:
+    return Result(writes=[Fact(tag="draft", value=f"draft from {view.value('research')}")])
+
+
+async def edit(input: object, view: View) -> Result:
+    return Result(writes=[Fact(tag="final", value=f"edited {view.value('draft')}")])
+
+
+async def main() -> None:
+    system = System(agents=[
+        as_agent(research, name="researcher", reads="topic"),
+        as_agent(write, name="writer", reads="research"),
+        as_agent(edit, name="editor", reads="draft"),
+    ])
+    store = Store()
+    async for report in ReactiveExecutor().stream(
+        system, store,
+        seed=[Fact(tag="topic", value="witcher")],
+        terminate=Goal(lambda v: v.exists("final")),
+    ):
+        print(f"step {report.step}: {report.fired} -> {[f.tag for f in report.writes]}")
+    print("final:", store.snapshot().value("final"))
+```
+
+Output:
+
+```
+step 0: ['researcher'] -> ['research']
+step 1: ['writer'] -> ['draft']
+step 2: ['editor'] -> ['final']
+final: edited draft from raw facts
+```
+
+One agent fires per step here because each one's input only appears after the previous one
+writes. Nothing scheduled that order. It fell out of what each agent reads.
+
+## Fact
+
+A fact is the unit of state. It is an immutable pydantic model.
+
+```python
+class Fact(BaseModel):
+    tag: str
+    value: Any = None
+    producer: str = ""
+    step: int = -1
+    meta: dict[str, Any] = Field(default_factory=dict)
+```
+
+You set `tag` and `value`. The engine fills in `producer` (which agent wrote it) and `step`
+(which superstep) when the fact is committed, so you leave those alone.
+
+Facts are never edited or deleted. To change something, you write a new fact. Tags are
+usually versioned for this reason: `draft:1`, then `draft:2`, and so on. The identity of a
+fact is `(tag, step)`, exposed as `fact.key`, and the engine uses that key to track what an
+agent has already consumed (see [Triggers](#triggers-and-the-fire-once-rule)).
+
+## Store and View
+
+The `Store` holds the facts. You almost never read from it directly. Instead the engine
+hands each agent a read-only `View`, which is a snapshot of the store frozen at the start of
+the current superstep.
+
+```python
+class View(Protocol):
+    def get(self, tag: str) -> Fact | None: ...   # latest fact for an exact tag
+    def value(self, tag: str) -> Any: ...          # latest value, or None
+    def query(self, pattern: str) -> list[Fact]: ...
+    def exists(self, pattern: str) -> bool: ...
+    def count(self, pattern: str) -> int: ...
+```
+
+Patterns are deliberately simple. A pattern is either an exact tag (`"draft:1"`) or a prefix
+glob ending in `*` (`"draft:*"`). There are no regexes.
+
+```python
+view.value("research")     # "raw facts"
+view.query("draft:*")      # [Fact(draft:1, ...), Fact(draft:2, ...)]
+view.count("vote:*")       # 5
+view.exists("verdict:*")   # True
+```
+
+`get` and `value` return the *latest* matching fact, so `view.value("draft:3")` gives you
+the value written under that tag. `query` returns matches in the order they were committed,
+which is why `view.query("draft:*")[-1]` is a common way to reach the newest draft.
+
+!!! note "Why a snapshot, not the live store"
+    Every agent in a superstep reads the same frozen view. If two agents run together,
+    neither sees the other's writes until the next step. This is what makes parallel runs
+    deterministic and free of read-write races. It also means that if you run several copies
+    of one agent in parallel, they cannot count each other. Give each copy its own identity
+    rather than deriving one from `view.count(...)` at runtime.
+
+## Agent
+
+An agent is anything that satisfies this contract. It is a `Protocol`, so there is no base
+class to inherit and no registration step.
+
+```python
+class Agent(Protocol):
+    name: str
+    reads: str
+
+    def trigger(self, view: View) -> bool: ...
+    async def invoke(self, input: Any, view: View) -> Result: ...
+    def describe(self) -> Card: ...
+```
+
+- `name` identifies the agent and stamps every fact it writes.
+- `reads` is the pattern of facts this agent consumes. The engine queries it to decide what
+  to pass as `input` and to track what the agent has already seen.
+- `trigger(view)` returns `True` when the agent wants to run, given the current snapshot.
+- `invoke(input, view)` does the work and returns a `Result`. It is `async`, so an agent is
+  free to call an LLM, hit the network, or just compute.
+- `describe()` returns a `Card` with metadata. Not used by the loop itself.
+
+To the engine an agent is a black box. It can wrap a single function, an LLM call, an entire
+external framework, or even another fedotmas system (see
+[Nesting](#nesting-a-system-is-an-agent)).
+
+### as_agent
+
+You rarely write the protocol by hand. `as_agent` wraps an async function into an agent.
+
+```python
+def as_agent(fn, *, name, reads="", trigger=None) -> Agent: ...
+```
+
+`fn` has the signature `async (input, view) -> Result`. If you do not pass a `trigger`, the
+default is "fire when at least one fact matches `reads`":
+
+```python
+# these are the same agent
+as_agent(write, name="writer", reads="research")
+as_agent(write, name="writer", reads="research",
+         trigger=lambda v: v.exists("research"))
+```
+
+That default is enough for plain chains and fan-outs. For loops, joins, and anything
+conditional you pass an explicit `trigger`, covered below.
+
+## Result
+
+`invoke` returns a `Result`. The only field the engine acts on is `writes`.
+
+```python
+class Result(BaseModel):
+    payload: Any = None
+    status: Status = Status.OK
+    error: str | None = None
+    usage: Usage | None = None
+    writes: list[Fact] = Field(default_factory=list)
+    control: Control | None = None
+```
+
+`writes` is the single channel through which an agent changes the world. There is no other
+way to affect state or to influence what runs next. Want to hand control to another agent?
+Write a fact that its trigger is watching for. Want to stop? Write the fact your terminate
+condition checks. Routing, handoff, spawning subtasks: all of it is "write a fact that some
+trigger reads". The `control` field exists for ergonomic sugar over this and is not used by
+the current engine.
+
+`payload`, `status`, `error`, and `usage` are there for reporting and reliability
+middleware. They do not affect the loop.
+
+## System
+
+A `System` is just the bag of agents you want to run together.
+
+```python
+@dataclass
+class System:
+    agents: list[Agent]
+```
+
+There are no edges in it. The wiring lives inside each agent's `reads` and `trigger`. Two
+agents interact whenever one writes a fact the other reads. This is why the same `System`
+shape can express a pipeline, a fan-out, a loop, or a blackboard. The topology is implied by
+the facts, not declared on the side.
+
+## ReactiveExecutor
+
+The executor runs a `System` against a `Store`. There is one implementation,
+`ReactiveExecutor`, and it offers two entry points.
+
+`stream` is the primary one. It is an async generator that yields a `StepReport` after every
+superstep, so you can watch the run unfold live:
+
+```python
+async for report in ReactiveExecutor().stream(system, store, seed=..., terminate=...):
+    print(report.step, report.fired)
+```
+
+`run` drains the stream and returns a single `Run` with the full trace and the final view:
+
+```python
+result = await ReactiveExecutor().run(system, store, seed=..., terminate=...)
+print(result.status, len(result.steps))
+print(result.view.value("final"))
+```
+
+Both take the same keyword arguments:
+
+| Argument    | Meaning                                                          | Default          |
+|-------------|------------------------------------------------------------------|------------------|
+| `seed`      | Facts committed before the first superstep, as the initial input | `()`             |
+| `terminate` | When to stop (see [Terminate](#terminate))                       | run to quiescence|
+| `policy`    | How to resolve which ready agents actually fire                  | `FireAll`        |
+
+The reporting types:
+
+```python
+@dataclass
+class StepReport:
+    step: int            # 0-based superstep index
+    fired: list[str]     # names of agents that ran this step
+    writes: list[Fact]   # facts they produced
+
+@dataclass
+class Run:
+    status: Status
+    steps: list[StepReport]
+    view: View           # final snapshot
+```
+
+### What one superstep does
+
+Each iteration of the loop:
+
+1. Take a snapshot of the store.
+2. For each agent, call `trigger(view)`. If it returns `True`, query its `reads` to get the
+   input facts.
+3. Skip any agent that has already fired on this exact set of input facts (the fire-once
+   rule, below).
+4. Hand the survivors to the `policy` to pick who actually runs.
+5. `await` all chosen agents at once with `asyncio.gather`.
+6. Stamp their writes with the agent name and step, commit them in one batch, yield a
+   `StepReport`.
+7. Check `terminate`. If done, stop. Otherwise increment the step and repeat.
+
+If no agent is ready, the system has gone quiet. The executor yields one final empty
+`StepReport` and stops on its own, even without a terminate condition.
+
+## Triggers and the fire-once rule
+
+This is the one piece of the engine that surprises people, so it is worth a moment.
+
+A trigger is **level-based**: it returns `True` whenever the store currently satisfies a
+condition. A naive loop would re-run an agent every superstep for as long as its condition
+held. The generator in a refinement loop would fire forever.
+
+The engine prevents this with a fire-once rule. It remembers, for each agent, the set of
+fact keys it has already consumed. An agent fires on a given input only once. Concretely the
+memo key is `(agent.name, frozenset(fact.key for fact in input_facts))`.
+
+This is why versioned tags matter. When the critic reads `draft:1` and writes `verdict:1`,
+the generator's input is now a new fact set, so it is allowed to fire again and produce
+`draft:2`. Each turn of the loop consumes genuinely new facts, so each turn is a distinct
+firing. The loop advances instead of spinning or stalling.
+
+In practice: use the default `exists` trigger for one-shot agents, and write an explicit
+trigger for loops and joins. Here is a join, where the aggregator should wait for all three
+upstream facts before running:
+
+```python
+as_agent(join, name="aggregator", reads="out:*",
+         trigger=lambda v: v.count("out:*") == 3)
+```
+
+## Policy
+
+When more than one agent is ready in the same superstep, the `Policy` decides which of them
+actually fire. The default lets them all run.
+
+```python
+class Policy(Protocol):
+    def select(self, ready: list[Agent], view: View) -> list[Agent]: ...
+```
+
+Two are provided. `FireAll` returns everyone (full parallelism, the default). `AuctionSelect`
+runs a scoring function over the ready set and fires only the single highest bidder, which is
+how a contract-net auction picks a winner:
+
+```python
+from fedotmas.engine.policy import AuctionSelect
+
+BIDS = {"w1": 0.3, "w2": 0.9, "w3": 0.5}
+
+ReactiveExecutor().stream(
+    system, store,
+    seed=[Fact(tag="task", value="haul cargo")],
+    policy=AuctionSelect(key=lambda agent, view: BIDS[agent.name]),
+)
+# only w2 ever fires
+```
+
+## Terminate
+
+A terminate condition decides when the run stops. The engine checks it after each committed
+superstep. If you pass none, the run continues until the system goes quiet on its own.
+
+```python
+class Terminate(Protocol):
+    def done(self, view: View, report) -> bool: ...
+```
+
+Three are built in:
+
+```python
+from fedotmas.engine.terminate import Goal, Budget, Quiescence
+
+Goal(lambda v: v.exists("final"))   # stop when a predicate over the store holds
+Budget(max_steps=8)                 # stop after N supersteps
+Quiescence()                        # stop when a step fired nobody
+```
+
+They compose with `&` and `|`, which is the usual way to combine a success condition with a
+safety cap:
+
+```python
+terminate = Goal(approved) | Budget(max_steps=8)
+```
+
+That reads as "stop when the work is approved, or after 8 steps regardless". The cap matters
+for loops where the goal might never be reached.
+
+## A loop: Evaluator-Optimizer
+
+The chain above never reused an agent. This example does. A generator produces a draft, a
+critic judges it, and the generator runs again if the critic was not satisfied. It is the
+same engine, the only new ingredients are explicit triggers and a composed terminate.
+
+```python
+import asyncio
+
+from fedotmas.adapters import as_agent
+from fedotmas.engine.contract import Fact, Result, View
+from fedotmas.engine.executor import ReactiveExecutor
+from fedotmas.engine.store import Store
+from fedotmas.engine.system import System
+from fedotmas.engine.terminate import Budget, Goal
+
+THRESHOLD = 3
+
+
+async def generate(input: object, view: View) -> Result:
+    n = view.count("draft:*") + 1
+    return Result(writes=[Fact(tag=f"draft:{n}", value={"quality": n})])
+
+
+def generate_trigger(view: View) -> bool:
+    verdicts = view.query("verdict:*")
+    return not verdicts or not verdicts[-1].value["approved"]
+
+
+async def critique(input: object, view: View) -> Result:
+    n = view.count("draft:*")
+    approved = view.value(f"draft:{n}")["quality"] >= THRESHOLD
+    return Result(writes=[Fact(tag=f"verdict:{n}", value={"approved": approved})])
+
+
+def critique_trigger(view: View) -> bool:
+    return view.count("draft:*") > view.count("verdict:*")
+
+
+def approved(view: View) -> bool:
+    verdicts = view.query("verdict:*")
+    return bool(verdicts) and verdicts[-1].value["approved"]
+
+
+async def main() -> None:
+    system = System(agents=[
+        as_agent(generate, name="generator", reads="verdict:*", trigger=generate_trigger),
+        as_agent(critique, name="critic", reads="draft:*", trigger=critique_trigger),
+    ])
+    store = Store()
+    async for report in ReactiveExecutor().stream(
+        system, store,
+        seed=[Fact(tag="task", value="write a haiku")],
+        terminate=Goal(approved) | Budget(max_steps=8),
+    ):
+        print(f"step {report.step}: {report.fired} -> {[f.tag for f in report.writes]}")
+```
+
+Output:
+
+```
+step 0: ['generator'] -> ['draft:1']
+step 1: ['critic'] -> ['verdict:1']
+step 2: ['generator'] -> ['draft:2']
+step 3: ['critic'] -> ['verdict:2']
+step 4: ['generator'] -> ['draft:3']
+step 5: ['critic'] -> ['verdict:3']
+```
+
+The generator stops firing once `verdict:3` is approved, because its trigger looks at the
+last verdict. The fire-once rule keeps each agent advancing through fresh `draft:N` /
+`verdict:N` pairs rather than re-running on stale input.
+
+## Nesting: a system is an agent
+
+Because an agent is just the contract, a whole subsystem can be one. Build an inner `System`
+with its own `Store`, then wrap it in a class that satisfies the `Agent` protocol and runs
+that system inside its `invoke`:
+
+```python
+class Team:
+    def __init__(self, name, system, *, reads, out):
+        self.name, self.reads = name, reads
+        self._system, self._out = system, out
+
+    def trigger(self, view):
+        return view.exists(self.reads) and not view.exists(self._out)
+
+    async def invoke(self, input, view):
+        inner = Store()
+        run = await ReactiveExecutor().run(
+            self._system, inner,
+            seed=[Fact(tag="task", value=view.value(self.reads))],
+            terminate=Goal(lambda v: v.exists("summary")),
+        )
+        return Result(writes=[Fact(tag=self._out, value=run.view.value("summary"))])
+
+    def describe(self):
+        return Card(name=self.name)
+```
+
+From the outer system's point of view, `Team` is one agent that reads a brief and writes a
+result. The nesting is free because there is nothing special to support. The same contract
+works at every level.
+
+## Reference
+
+| Import                                  | What it is                                  |
+|-----------------------------------------|---------------------------------------------|
+| `engine.contract.Fact`                  | tagged immutable value, the unit of state   |
+| `engine.contract.Result`               | what `invoke` returns, `writes` is the channel |
+| `engine.contract.View` / `Agent`        | the read snapshot and the agent protocol    |
+| `engine.store.Store`                    | the shared blackboard                       |
+| `engine.system.System`                  | the set of agents to run                    |
+| `engine.executor.ReactiveExecutor`      | the superstep loop, `stream` and `run`      |
+| `engine.policy.FireAll` / `AuctionSelect` | resolve who fires in a step               |
+| `engine.terminate.Goal` / `Budget` / `Quiescence` | when to stop, composable with `&` `|` |
+| `adapters.as_agent`                     | wrap an async function as an agent          |
+
+Things to keep in mind:
+
+- State only changes through `Result.writes`. There is no other side channel.
+- Facts are append-only and versioned. Never mutate, write a new tag.
+- A superstep is the unit of progress. Agents in one step share a snapshot and cannot see
+  each other's writes until the next step.
+- Triggers are level-based, but the fire-once rule makes an agent run only once per distinct
+  input fact set.
+- Give parallel copies of an agent their own identity. They cannot count each other within a
+  step.
