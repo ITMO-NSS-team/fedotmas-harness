@@ -22,6 +22,11 @@ When = Callable[[View], bool]
 
 @dataclass
 class Rule:
+    """One blackboard agent. When `when(view)` holds, run `fn` and write its result to the
+    `writes` fact; `reads` names the fact fed to fn as input (empty means none). The author
+    writes `when` directly because there is no topology to derive a trigger from.
+    """
+
     name: str
     when: When
     fn: StepFn
@@ -38,4 +43,8 @@ def _rule_agent(rule: Rule) -> Agent:
 
 
 def blackboard(*rules: Rule) -> System:
+    """Assemble rules into a blackboard System: agents that self-activate when their `when`
+    condition holds, with no fixed topology. Run it directly on the engine, or wrap it with
+    embed to drop the whole blackboard into a flow as one typed node.
+    """
     return System([_rule_agent(r) for r in rules])

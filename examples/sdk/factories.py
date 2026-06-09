@@ -3,7 +3,7 @@
 This pins the API the factory code is written against. action lifts a python function,
 agent lifts a prompt into an LLM node, decision lifts a prompt into a router over a finite
 label set. All three produce Flow[A, B] and compose with the same operators. The LLM seam
-is the Model protocol, faked here so the spec runs without a backend.
+is the LLM protocol, faked here so the spec runs without a backend.
 
 Run after the factories exist; until then it fails on import. The asserts are the contract.
 """
@@ -18,11 +18,13 @@ from fedotmas.engine.store import Store
 from fedotmas.engine.terminate import Goal
 
 
-class FakeModel:
+class FakeLLM:
     def __init__(self, reply) -> None:
         self._reply = reply
 
-    async def complete(self, prompt: str, input: Any, view: View) -> Any:
+    async def complete(
+        self, prompt: str, input: Any, view: View, returns: type = str
+    ) -> Any:
         return self._reply(prompt, input)
 
 
@@ -47,7 +49,7 @@ async def main() -> None:
     summarize = agent(
         "summarize",
         prompt="Summarize in one word:",
-        model=FakeModel(lambda prompt, text: text.split()[0]),
+        llm=FakeLLM(lambda prompt, text: text.split()[0]),
     )
     chain = shout + summarize
     result = await run(
@@ -62,12 +64,10 @@ async def main() -> None:
         "route",
         prompt="Pick the topic:",
         labels=["math", "prose"],
-        model=FakeModel(lambda prompt, q: "math" if q[0].isdigit() else "prose"),
+        llm=FakeLLM(lambda prompt, q: "math" if q[0].isdigit() else "prose"),
     )
-    solver = agent("solve", prompt="Solve:", model=FakeModel(lambda p, q: f"{q} = 4"))
-    writer = agent(
-        "write", prompt="Write:", model=FakeModel(lambda p, q: f"prose: {q}")
-    )
+    solver = agent("solve", prompt="Solve:", llm=FakeLLM(lambda p, q: f"{q} = 4"))
+    writer = agent("write", prompt="Write:", llm=FakeLLM(lambda p, q: f"prose: {q}"))
     router = branch(route, {"math": solver, "prose": writer})
     answer = await run(
         "branch: decision(route) -> {math: solve, prose: write}",

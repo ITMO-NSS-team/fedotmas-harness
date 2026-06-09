@@ -7,15 +7,16 @@ flow, embed runs a sub-system as one opaque node. The type parameters make the s
 checkable: a + b only type-checks when b accepts what a produces, so an unjoined parallel
 (a tuple output the next stage must consume) becomes a type error, not a runtime footgun.
 
-Composition is lazy. A Flow only allocates fact tags and agents at .system(), so the same
-fragment can be reused and nested. The operators are sugar over the methods (then/par).
+This module is model-free: action is the only atom here, mechanical. The LLM atoms (agent,
+decision) live in llm; the rule surface in rules. Composition is lazy, a Flow only allocates
+fact tags and agents at .system(), so the same fragment can be reused and nested.
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Generic, Protocol, TypeVar, overload
+from typing import Any, Generic, TypeVar
 
 from fedotmas.adapters import as_agent
 from fedotmas.engine.contract import Agent, Fact, Result, View
@@ -29,10 +30,6 @@ B = TypeVar("B")
 C = TypeVar("C")
 
 ActionFn = Callable[[A, View], Awaitable[B]]
-
-
-class Model(Protocol):
-    async def complete(self, prompt: str, input: Any, view: View) -> Any: ...
 
 
 @dataclass
@@ -75,6 +72,13 @@ def _alias_agent(src: str, out: str, name: str | None = None) -> Agent:
 
 
 class Flow(Generic[A, B]):
+    """A typed dataflow fragment from input A to output B. Make atoms with action (or agent,
+    decision from llm), then compose: + is sequence, * and gather are parallel, branch routes
+    by label, .loop iterates, embed nests a whole sub-system as one node. `.system(entry, out)`
+    compiles the fragment to an engine System. The type parameters check each stitch: a + b
+    only type-checks when b accepts what a produces.
+    """
+
     def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Agent], str]:
         raise NotImplementedError
 
@@ -233,6 +237,11 @@ class _Branch(Flow[Any, Any]):
 def branch(
     select: Flow[A, str] | Callable[[A], str], cases: dict[str, Flow[A, B]]
 ) -> Flow[A, B]:
+    """Route the input to exactly one case by a label, then merge back to one output. `select`
+    is either a python callable A -> label (resolved in a single step) or a decision flow that
+    produces the label (an extra router step). All cases share input and output types, so the
+    whole branch stays one typed arrow Flow[A, B].
+    """
     return _Branch(select, cases)
 
 
@@ -252,81 +261,19 @@ class _Gather(Flow[Any, Any]):
 
 
 def gather(*flows: Flow[A, B]) -> Flow[A, list[B]]:
+    """Run several flows on the same input in parallel and collect their outputs into a list,
+    joined when all complete. The n-ary form of *; follow it with a reducer (e.g. + majority)
+    to fold the list into one value.
+    """
     return _Gather(flows)
 
 
 def action(fn: ActionFn[A, B]) -> Flow[A, B]:
+    """Lift a plain async function (input, view) -> output into a Flow atom. The body is code
+    and the types come from the signature; no model is involved. This is the model-free atom,
+    the same arrow shape an agent has but mechanical, so the two compose without distinction.
+    """
     return _Action(getattr(fn, "__name__", "action"), fn)
-
-
-@overload
-def agent(
-    name: str, *, prompt: str, model: Model | None = ..., role: str = ...
-) -> Flow[str, str]: ...
-@overload
-def agent(
-    name: str,
-    *,
-    prompt: str,
-    takes: type[A],
-    returns: type[B],
-    model: Model | None = ...,
-    role: str = ...,
-) -> Flow[A, B]: ...
-def agent(
-    name: str,
-    *,
-    prompt: str,
-    takes: type = str,
-    returns: type = str,
-    model: Model | None = None,
-    role: str = "",
-) -> Flow[Any, Any]:
-    async def invoke(input: Any, view: View) -> Any:
-        if model is None:
-            raise RuntimeError(f"agent {name!r} has no model bound")
-        return await model.complete(prompt, input, view)
-
-    return _Action(name, invoke)
-
-
-@overload
-def decision(
-    name: str,
-    *,
-    prompt: str,
-    labels: list[str],
-    model: Model | None = ...,
-    role: str = ...,
-) -> Flow[str, str]: ...
-@overload
-def decision(
-    name: str,
-    *,
-    prompt: str,
-    labels: list[str],
-    takes: type[A],
-    model: Model | None = ...,
-    role: str = ...,
-) -> Flow[A, str]: ...
-def decision(
-    name: str,
-    *,
-    prompt: str,
-    labels: list[str],
-    takes: type = str,
-    model: Model | None = None,
-    role: str = "",
-) -> Flow[Any, str]:
-    async def invoke(input: Any, view: View) -> Any:
-        if model is None:
-            raise RuntimeError(f"decision {name!r} has no model bound")
-        label = await model.complete(prompt, input, view)
-        if label not in labels:
-            raise ValueError(f"decision {name!r} returned {label!r} not in {labels}")
-        return label
-
-    return _Action(name, invoke)
 
 
 class _Embed(Flow[A, B]):

@@ -114,16 +114,16 @@ checkable.
 authored without hand-writing a model call.
 
 ```python
-def agent(name, *, prompt, takes=str, returns=str, model=None, role="") -> Flow[A, B]: ...
+def agent(name, *, prompt, takes=str, returns=str, llm=None, role="") -> Flow[A, B]: ...
 ```
 
 `takes` and `returns` declare the arrow's types, defaulting to `str -> str`, so an `agent`
-composes under `ty` exactly like an `action`. The node does not bind a model itself. At runtime
-it calls a `Model` (below), and that binding is injected, which keeps the SDK agnostic about
-which backend runs.
+composes under `ty` exactly like an `action`. The node does not bind a backend itself. At
+runtime it calls an `LLM` (below), passed as `llm`, and that binding is injected, which keeps
+the SDK agnostic about which backend runs.
 
 ```python
-summarize = agent("summarize", prompt="Summarize in one word:", model=some_model)
+summarize = agent("summarize", prompt="Summarize in one word:", llm=some_llm)
 chain = shout + summarize
 ```
 
@@ -147,14 +147,14 @@ is `Flow[A, str]`, and it is what drives a `branch` when the route is chosen at 
 than by a plain function.
 
 ```python
-def decision(name, *, prompt, labels, takes=str, model=None, role="") -> Flow[A, str]: ...
+def decision(name, *, prompt, labels, takes=str, llm=None, role="") -> Flow[A, str]: ...
 ```
 
 The result is validated against `labels` at runtime. A `branch` accepts a `decision` in place
 of a callable selector:
 
 ```python
-route = decision("route", prompt="Pick the topic:", labels=["math", "prose"], model=some_model)
+route = decision("route", prompt="Pick the topic:", labels=["math", "prose"], llm=some_llm)
 router = branch(route, {"math": solver, "prose": writer})
 ```
 
@@ -171,19 +171,23 @@ The decision runs first and writes a label, the router sends the original input 
 case, and exactly one case fires. A plain `Callable` selector still works and saves the extra
 step; reach for `decision` when the choice itself needs a model.
 
-### Model
+### LLM
 
 `agent` and `decision` are agnostic about how a prompt turns into a value. That seam is one
-protocol.
+protocol, and it is a parameter of those factories, not a way into the engine.
 
 ```python
-class Model(Protocol):
-    async def complete(self, prompt: str, input: Any, view: View) -> Any: ...
+class LLM(Protocol):
+    async def complete(
+        self, prompt: str, input: Any, view: View, returns: type = str
+    ) -> Any: ...
 ```
 
-Anything with that method is a model: an LLM client, a stub, a fake in a test. The SDK never
+`returns` carries the declared output type of the node, so a backend that supports structured
+output can produce that type directly; a plain text backend ignores it. Anything with that
+method is a backend: an LLM client, a whole framework, a stub, a fake in a test. The SDK never
 imports a provider. This is the LLM-agnostic point made concrete. An `action` is a model-free
-atom, an `agent` is the same atom shape with a `Model` behind it, and the two compose without
+atom, an `agent` is the same atom shape with an `LLM` behind it, and the two compose without
 distinction.
 
 ## Sequence: `+`
@@ -566,9 +570,9 @@ between them.
 |------------------------------|--------------------------------------------------------------|
 | `sdk.Flow`                   | the typed arrow `Flow[A, B]`, a lazy dataflow fragment        |
 | `sdk.action`                 | wrap a typed async function as a mechanical atom              |
-| `sdk.agent`                  | lift a prompt into an LLM atom, `Flow[A, B]` over a `Model`   |
+| `sdk.agent`                  | lift a prompt into an LLM atom, `Flow[A, B]` over an `LLM`    |
 | `sdk.decision`               | lift a prompt into a router, `Flow[A, str]` over labels       |
-| `sdk.Model`                  | the LLM seam, one async `complete(prompt, input, view)`       |
+| `sdk.LLM`                    | the LLM seam, one async `complete(prompt, input, view, returns)` |
 | `Flow.__add__` / `.then`     | sequence, `Flow[A, B] + Flow[B, C] -> Flow[A, C]`             |
 | `Flow.__mul__` / `.par`      | parallel product, `-> Flow[A, tuple[B, C]]`                   |
 | `sdk.gather`                 | n-ary parallel, `*Flow[A, B] -> Flow[A, list[B]]`            |
@@ -583,7 +587,7 @@ Things to keep in mind:
 
 - A flow is lazy. It allocates agents and tags only at `.system(entry, out)`, so it is free to
   reuse and nest.
-- An atom is a function (`action`) or a prompt over a `Model` (`agent`, `decision`). Both are
+- An atom is a function (`action`) or a prompt over an `LLM` (`agent`, `decision`). Both are
   the same `Flow` and compose alike, and the SDK never imports an LLM provider.
 - The types are a design-time contract. They are checked before the run and are `Any` at
   runtime, which is why the function signatures should be honest.
