@@ -15,6 +15,7 @@ from fedotmas.engine.contract import Agent, Fact, Result, View
 from fedotmas.engine.system import System
 
 StepFn = Callable[[Any, View], Awaitable[Any]]
+JoinFn = Callable[[list[Any], View], Awaitable[Any]]
 
 
 @dataclass
@@ -47,4 +48,87 @@ def seq(*items: Step | StepFn, entry: str, out: str) -> System:
         out_tag = out if i == len(steps) - 1 else step.name
         agents.append(_step_agent(step, prev, out_tag))
         prev = out_tag
+    return System(agents)
+
+
+def _join_agent(fn: JoinFn, prefix: str, out: str, width: int) -> Agent:
+    async def invoke(input: Any, view: View) -> Result:
+        values = [f.value for f in view.query(prefix)]
+        value = await fn(values, view)
+        return Result(writes=[Fact(tag=out, value=value)])
+
+    return as_agent(
+        invoke,
+        name=f"join:{out}",
+        reads=prefix,
+        trigger=lambda v: v.count(prefix) == width,
+    )
+
+
+def parallel(*branches: Step | StepFn, join: JoinFn, entry: str, out: str) -> System:
+    steps = [_as_step(b) for b in branches]
+    agents: list[Agent] = [
+        _step_agent(Step(f"{step.name}:{i}", step.fn), entry, f"{out}:{i}")
+        for i, step in enumerate(steps)
+    ]
+    agents.append(_join_agent(join, f"{out}:*", out, len(steps)))
+    return System(agents)
+
+
+LoopUntil = Callable[[Any, View], bool]
+
+
+def _latest(view: View, pattern: str) -> Fact | None:
+    found = view.query(pattern)
+    return found[-1] if found else None
+
+
+def _loop_head(step: Step, gate: str, own: str, entry: str, until: LoopUntil) -> Agent:
+    async def invoke(input: Any, view: View) -> Result:
+        g = _latest(view, gate + "*")
+        src = g.value if g is not None else view.value(entry)
+        value = await step.fn(src, view)
+        n = view.count(own + "*") + 1
+        return Result(writes=[Fact(tag=own + str(n), value=value)])
+
+    def trigger(view: View) -> bool:
+        g = _latest(view, gate + "*")
+        if g is None:
+            return view.exists(entry)
+        return not until(g.value, view)
+
+    return as_agent(invoke, name=step.name, reads=gate + "*", trigger=trigger)
+
+
+def _loop_step(step: Step, up: str, own: str) -> Agent:
+    async def invoke(input: Any, view: View) -> Result:
+        u = _latest(view, up + "*")
+        value = await step.fn(u.value if u is not None else None, view)
+        n = view.count(own + "*") + 1
+        return Result(writes=[Fact(tag=own + str(n), value=value)])
+
+    return as_agent(invoke, name=step.name, reads=up + "*")
+
+
+def _loop_finalize(gate: str, head: str, out: str, until: LoopUntil) -> Agent:
+    async def invoke(input: Any, view: View) -> Result:
+        artifact = _latest(view, head + "*")
+        value = artifact.value if artifact is not None else None
+        return Result(writes=[Fact(tag=out, value=value)])
+
+    def trigger(view: View) -> bool:
+        g = _latest(view, gate + "*")
+        return g is not None and until(g.value, view) and not view.exists(out)
+
+    return as_agent(invoke, name=f"done:{out}", reads=gate + "*", trigger=trigger)
+
+
+def loop(*items: Step | StepFn, until: LoopUntil, entry: str, out: str) -> System:
+    steps = [_as_step(i) for i in items]
+    pre = [f"{out}:{j}." for j in range(len(steps))]
+    gate = pre[-1]
+    agents: list[Agent] = [_loop_head(steps[0], gate, pre[0], entry, until)]
+    for j in range(1, len(steps)):
+        agents.append(_loop_step(steps[j], pre[j - 1], pre[j]))
+    agents.append(_loop_finalize(gate, pre[0], out, until))
     return System(agents)

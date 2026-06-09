@@ -41,3 +41,5 @@ on running code.
 | Combinator | File | Equivalent engine example |
 |---|---|---|
 | `seq` | `combinators/seq.py` | `engine/prompt_chaining.py` |
+| `parallel` / `join` | `combinators/parallel.py` | `engine/sectioning.py` |
+| `loop` | `combinators/loop.py` | `engine/eval_optimizer.py`, `engine/reflection.py` |
