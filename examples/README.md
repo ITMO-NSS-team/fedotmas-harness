@@ -1,30 +1,5 @@
 # Examples
 
-Organized by layer, lowest to highest.
-
-- `engine/` raw engine. Patterns built directly on the `Agent` contract with hand-written
-  triggers. These are the universality proof and double as reference implementations.
-- `flow/` the edge surface as typed arrows (`fedotmas.sdk`). A `Flow[A, B]` composes with
-  `+` (sequence), `*` / `gather` (parallel), `branch`, `.loop`, and `embed`, and the type
-  parameters make the stitch checkable by `ty`. This is the whole edge surface; it
-  replaced the earlier flat combinators, which could not nest.
-- `presets/` the rule surface (`fedotmas.sdk`) and, later, named pattern constructors built
-  on top. A rule pairs an author-written condition with a step; there is no shape to
-  derive a trigger from, so the author writes it. This is the blackboard superset the
-  arrows cannot express.
-
-Run any one: `uv run python examples/<dir>/<name>.py` (each streams its superstep trace).
-
-## flow/
-
-| Shape | File | Operators | Engine twin |
-|---|---|---|---|
-| seq, parallel-into-seq | `flow/composition.py` | `a + b + c`, `(a * b) + c` | `prompt_chaining`, `sectioning` |
-| loop (reflection, eval-optimizer) | `flow/loop.py` | `body.loop(until)` | `reflection`, `eval_optimizer` |
-| branch / router | `flow/branch.py` | `branch(select, cases)` | `router` |
-| n-ary parallel + vote | `flow/gather.py` | `gather(a, b, c) + reduce` | `voting` |
-| blackboard as an embedded node | `flow/embed.py` | `frame + embed(bb) + report` | `blackboard`, `hierarchical` |
-
 ## engine/
 
 Every file runs the **same** `ReactiveExecutor` over the **same** `Store` + `Agent`
@@ -50,9 +25,3 @@ on running code.
 | Contract-Net (P14) | `engine/contract_net.py` | `AuctionSelect` Policy picks the winning bidder |
 | Reflection (P15) | `engine/reflection.py` | single agent self-revises (critic folded in) |
 | Debate (P16) | `engine/debate.py` | parallel rounds judged in a loop, transcript accrues |
-
-## presets/
-
-| Surface | File | Equivalent engine example |
-|---|---|---|
-| `rules` / `blackboard` | `presets/blackboard.py` | `engine/blackboard.py` |
