@@ -4,14 +4,26 @@ Organized by layer, lowest to highest.
 
 - `engine/` raw engine. Patterns built directly on the `Agent` contract with hand-written
   triggers. These are the universality proof and double as reference implementations.
-- `combinators/` the edge surface, built with `dsl.combinators`. Steps are plain async
-  functions, the combinator derives tags, triggers, and wiring from the fixed shape.
+- `flow/` the edge surface as typed arrows (`dsl.flow`). A `Flow[A, B]` composes with
+  `+` (sequence), `*` / `gather` (parallel), `branch`, `.loop`, and `embed`, and the type
+  parameters make the stitch checkable by `ty`. This is the whole edge surface; it
+  replaced the earlier flat combinators, which could not nest.
 - `presets/` the rule surface (`dsl.rules`) and, later, named pattern constructors built
   on top. A rule pairs an author-written condition with a step; there is no shape to
   derive a trigger from, so the author writes it. This is the blackboard superset the
-  combinators cannot express.
+  arrows cannot express.
 
 Run any one: `uv run python examples/<dir>/<name>.py` (each streams its superstep trace).
+
+## flow/
+
+| Shape | File | Operators | Engine twin |
+|---|---|---|---|
+| seq, parallel-into-seq | `flow/composition.py` | `a + b + c`, `(a * b) + c` | `prompt_chaining`, `sectioning` |
+| loop (reflection, eval-optimizer) | `flow/loop.py` | `body.loop(until)` | `reflection`, `eval_optimizer` |
+| branch / router | `flow/branch.py` | `branch(select, cases)` | `router` |
+| n-ary parallel + vote | `flow/gather.py` | `gather(a, b, c) + reduce` | `voting` |
+| blackboard as an embedded node | `flow/embed.py` | `frame + embed(bb) + report` | `blackboard`, `hierarchical` |
 
 ## engine/
 
@@ -38,15 +50,6 @@ on running code.
 | Contract-Net (P14) | `engine/contract_net.py` | `AuctionSelect` Policy picks the winning bidder |
 | Reflection (P15) | `engine/reflection.py` | single agent self-revises (critic folded in) |
 | Debate (P16) | `engine/debate.py` | parallel rounds judged in a loop, transcript accrues |
-
-## combinators/
-
-| Combinator | File | Equivalent engine example |
-|---|---|---|
-| `seq` | `combinators/seq.py` | `engine/prompt_chaining.py` |
-| `parallel` / `join` | `combinators/parallel.py` | `engine/sectioning.py` |
-| `branch` | `combinators/branch.py` | `engine/router.py` |
-| `loop` | `combinators/loop.py` | `engine/eval_optimizer.py`, `engine/reflection.py` |
 
 ## presets/
 
