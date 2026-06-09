@@ -1,7 +1,8 @@
 """Programmatic combinators that compile authoring forms into an engine System.
 
 A step is a plain async function returning a value. The combinator owns the fact tags,
-the triggers, and the wiring. seq lays steps in a line by data dependency.
+the triggers, and the wiring. seq lays steps in a line by data dependency, parallel
+fans out and joins, branch routes to one case by a label, loop iterates in rounds.
 """
 
 from __future__ import annotations
@@ -72,6 +73,34 @@ def parallel(*branches: Step | StepFn, join: JoinFn, entry: str, out: str) -> Sy
         for i, step in enumerate(steps)
     ]
     agents.append(_join_agent(join, f"{out}:*", out, len(steps)))
+    return System(agents)
+
+
+def _route_agent(select: StepFn, entry: str, label: str, out: str) -> Agent:
+    async def invoke(input: Any, view: View) -> Result:
+        value = await select(view.value(entry) if entry else None, view)
+        return Result(writes=[Fact(tag=label, value=value)])
+
+    return as_agent(invoke, name=f"route:{out}", reads=entry)
+
+
+def _case_agent(case: str, step: Step, label: str, entry: str, out: str) -> Agent:
+    async def invoke(input: Any, view: View) -> Result:
+        value = await step.fn(view.value(entry) if entry else None, view)
+        return Result(writes=[Fact(tag=out, value=value)])
+
+    return as_agent(
+        invoke, name=step.name, reads=label, trigger=lambda v: v.value(label) == case
+    )
+
+
+def branch(
+    select: StepFn, *, cases: dict[str, Step | StepFn], entry: str, out: str
+) -> System:
+    label = f"{out}:route"
+    agents: list[Agent] = [_route_agent(select, entry, label, out)]
+    for case, item in cases.items():
+        agents.append(_case_agent(case, _as_step(item), label, entry, out))
     return System(agents)
 
 

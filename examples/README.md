@@ -4,9 +4,12 @@ Organized by layer, lowest to highest.
 
 - `engine/` raw engine. Patterns built directly on the `Agent` contract with hand-written
   triggers. These are the universality proof and double as reference implementations.
-- `combinators/` the same shapes built with `dsl.combinators`. Steps are plain async
-  functions, the combinator owns tags and wiring.
-- `presets/` named pattern constructors (planned).
+- `combinators/` the edge surface, built with `dsl.combinators`. Steps are plain async
+  functions, the combinator derives tags, triggers, and wiring from the fixed shape.
+- `presets/` the rule surface (`dsl.rules`) and, later, named pattern constructors built
+  on top. A rule pairs an author-written condition with a step; there is no shape to
+  derive a trigger from, so the author writes it. This is the blackboard superset the
+  combinators cannot express.
 
 Run any one: `uv run python examples/<dir>/<name>.py` (each streams its superstep trace).
 
@@ -42,4 +45,11 @@ on running code.
 |---|---|---|
 | `seq` | `combinators/seq.py` | `engine/prompt_chaining.py` |
 | `parallel` / `join` | `combinators/parallel.py` | `engine/sectioning.py` |
+| `branch` | `combinators/branch.py` | `engine/router.py` |
 | `loop` | `combinators/loop.py` | `engine/eval_optimizer.py`, `engine/reflection.py` |
+
+## presets/
+
+| Surface | File | Equivalent engine example |
+|---|---|---|
+| `rules` / `blackboard` | `presets/blackboard.py` | `engine/blackboard.py` |
