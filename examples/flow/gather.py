@@ -8,7 +8,7 @@ reducer is an ordinary next action over the list, so the type makes the join man
 import asyncio
 from collections import Counter
 
-from fedotmas.dsl.flow import action, gather
+from fedotmas.sdk import action, gather
 from fedotmas.engine.contract import Fact, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store

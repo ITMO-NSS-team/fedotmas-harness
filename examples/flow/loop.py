@@ -7,7 +7,7 @@ match, so the state contract is checked. The predicate reads that state value.
 
 import asyncio
 
-from fedotmas.dsl.flow import action
+from fedotmas.sdk import action
 from fedotmas.engine.contract import Fact, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store

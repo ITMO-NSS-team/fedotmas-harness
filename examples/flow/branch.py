@@ -7,7 +7,7 @@ boundary, so the cases are interchangeable by type and each is itself composable
 
 import asyncio
 
-from fedotmas.dsl.flow import action, branch
+from fedotmas.sdk import action, branch
 from fedotmas.engine.contract import Fact, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store

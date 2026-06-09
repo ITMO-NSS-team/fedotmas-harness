@@ -7,7 +7,7 @@ types make the stitch checkable: combine must accept tuple[str, str], the produc
 
 import asyncio
 
-from fedotmas.dsl.flow import action
+from fedotmas.sdk import action
 from fedotmas.engine.contract import Fact, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store

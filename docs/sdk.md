@@ -1,15 +1,16 @@
-# Flow
+# SDK
 
-A flow is a typed arrow from one value to another. `Flow[A, B]` is a piece of a multi-agent
+The SDK is the embedded Python surface for building agent systems by hand. Its primary surface
+is the flow: a typed arrow from one value to another. `Flow[A, B]` is a piece of a multi-agent
 system that takes an input of type `A` and produces an output of type `B`. You build small
 arrows, compose them with a handful of operators, and the composition is itself an arrow you
 can compose further.
 
 Underneath, a flow is just a way to produce agents for the runtime. It carries no runtime of
-its own. The point it adds on top of the runtime is the types: because every arrow declares
-what it consumes and what it yields, the composition is checkable before anything runs. A
-stage that produces a pair feeding a stage that expects a single value is a type error, not a
-surprise at step four.
+its own. The point the SDK adds on top of the runtime is the types: because every arrow
+declares what it consumes and what it yields, the composition is checkable before anything
+runs. A stage that produces a pair feeding a stage that expects a single value is a type
+error, not a surprise at step four.
 
 ## The mental model
 
@@ -24,9 +25,9 @@ bag of agents the runtime executes. The same flow can be compiled more than once
 nested inside a larger flow, because it bakes in no concrete tags until that moment.
 
 So there are two languages in play. The arrow language (`+`, `*`, `gather`, `branch`,
-`.loop`, `embed`) is what you write. The fact-and-agent language is what it compiles to. The
-rest of this page is the arrow language, with the compiled trace shown alongside so you can
-see the seam.
+`.loop`, `embed`) is what you write. The fact-and-agent language is what it compiles to. Most
+of this page is the arrow language, with the compiled trace shown alongside so you can see the
+seam; the atoms that fill the arrows and the rule surface for shapeless work come after.
 
 ## A first flow
 
@@ -36,7 +37,7 @@ type of each stage has to match the input type of the next, and that is the whol
 ```python
 import asyncio
 
-from fedotmas.dsl.flow import action
+from fedotmas.sdk import action
 from fedotmas.engine.contract import Fact, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
@@ -86,9 +87,14 @@ could appear twice in one flow without colliding. The last step is an `alias`: t
 its output under `edit#3`, you asked for it under `final`, so one extra agent copies the
 value across. That alias is the only bookkeeping the boundary costs.
 
+## Atoms
+
+An atom is a leaf arrow, the smallest `Flow`. Three factories produce one, differing only in
+what fills the leaf. All three return a `Flow[A, B]` and compose with the same operators.
+
 ### action
 
-`action` turns an async function into an atom.
+`action` lifts a python function. The body is the behavior.
 
 ```python
 def action(fn: ActionFn[A, B]) -> Flow[A, B]: ...
@@ -97,11 +103,88 @@ def action(fn: ActionFn[A, B]) -> Flow[A, B]: ...
 The function has the signature `async (input: A, view: View) -> B`. The first argument is the
 value flowing in, already unwrapped from its fact, typed as `A`. The return value, typed `B`,
 becomes the arrow's output. `view` is the read-only snapshot of the whole store, there if a
-stage needs to look at something beyond its direct input, ignorable otherwise.
+stage needs to look at something beyond its direct input, ignorable otherwise. The types on the
+signature are the types of the arrow, so write them honestly rather than reaching for `Any`:
+`research` above is a `Flow[str, str]`, and that annotation is what makes the composition
+checkable.
 
-The types on the function signature are the types of the arrow. `research` above is a
-`Flow[str, str]`. That annotation is what makes the composition checkable, so it is worth
-writing honestly rather than reaching for `Any`.
+### agent
+
+`agent` lifts a prompt. The behavior is data, not code, which is what lets an LLM node be
+authored without hand-writing a model call.
+
+```python
+def agent(name, *, prompt, takes=str, returns=str, model=None, role="") -> Flow[A, B]: ...
+```
+
+`takes` and `returns` declare the arrow's types, defaulting to `str -> str`, so an `agent`
+composes under `ty` exactly like an `action`. The node does not bind a model itself. At runtime
+it calls a `Model` (below), and that binding is injected, which keeps the SDK agnostic about
+which backend runs.
+
+```python
+summarize = agent("summarize", prompt="Summarize in one word:", model=some_model)
+chain = shout + summarize
+```
+
+Running `shout + summarize` on `"hello world"` with a model that returns the first word:
+
+```
+step 0: ['shout#1'] -> ['shout#1']
+step 1: ['summarize#2'] -> ['summarize#2']
+step 2: ['alias:out'] -> ['out']
+out: HELLO
+```
+
+An `agent` is an atom like any other. It took its input from the previous stage and handed a
+value to the next, and nothing in the composition knew or cared that the middle step was a
+model call rather than a function.
+
+### decision
+
+`decision` lifts a prompt into a router. Its output is one label from a fixed set, so its type
+is `Flow[A, str]`, and it is what drives a `branch` when the route is chosen at runtime rather
+than by a plain function.
+
+```python
+def decision(name, *, prompt, labels, takes=str, model=None, role="") -> Flow[A, str]: ...
+```
+
+The result is validated against `labels` at runtime. A `branch` accepts a `decision` in place
+of a callable selector:
+
+```python
+route = decision("route", prompt="Pick the topic:", labels=["math", "prose"], model=some_model)
+router = branch(route, {"math": solver, "prose": writer})
+```
+
+```
+step 0: ['route#2'] -> ['route#2']
+step 1: ['branch#1:route'] -> ['branch#1:in:math']
+step 2: ['solve#3'] -> ['solve#3']
+step 3: ['branch#1:join:math'] -> ['branch#1']
+step 4: ['alias:answer'] -> ['answer']
+answer: 2 + 2 = 4
+```
+
+The decision runs first and writes a label, the router sends the original input to the chosen
+case, and exactly one case fires. A plain `Callable` selector still works and saves the extra
+step; reach for `decision` when the choice itself needs a model.
+
+### Model
+
+`agent` and `decision` are agnostic about how a prompt turns into a value. That seam is one
+protocol.
+
+```python
+class Model(Protocol):
+    async def complete(self, prompt: str, input: Any, view: View) -> Any: ...
+```
+
+Anything with that method is a model: an LLM client, a stub, a fake in a test. The SDK never
+imports a provider. This is the LLM-agnostic point made concrete. An `action` is a model-free
+atom, an `agent` is the same atom shape with a `Model` behind it, and the two compose without
+distinction.
 
 ## Sequence: `+`
 
@@ -185,7 +268,7 @@ that list is, again, just the next stage.
 ```python
 from collections import Counter
 
-from fedotmas.dsl.flow import action, gather
+from fedotmas.sdk import action, gather
 
 
 @action
@@ -232,7 +315,7 @@ is a full `Flow[A, B]`, which means a case can itself be a chain, a parallel blo
 branch.
 
 ```python
-from fedotmas.dsl.flow import action, branch
+from fedotmas.sdk import action, branch
 
 
 def classify(q: str) -> str:
@@ -355,8 +438,7 @@ the incoming value under `entry`, runs the sub-system to its goal (`until`, defa
 is opaque.
 
 ```python
-from fedotmas.dsl.flow import Flow, action, embed
-from fedotmas.dsl.rules import Rule, blackboard
+from fedotmas.sdk import Flow, Rule, action, blackboard, embed
 
 investigation = blackboard(
     Rule("hypothesizer",
@@ -410,6 +492,59 @@ The payoff scales past hand-written systems. A typed Python arrow algebra is a s
 search space and a far better target for a program that generates systems than a freeform
 diagram. The same property that catches your mistake prunes a generator's.
 
+## The rule surface
+
+Not every system is an arrow. When activation is opportunistic, when agents fire in no fixed
+order as the store happens to satisfy them, there is no `A -> B` shape to type. For that the SDK
+has a second surface: rules.
+
+A `Rule` pairs an author-written condition with a step. Unlike a flow there is no topology to
+derive a trigger from, so you write `when` yourself; the helper owns the fact bookkeeping.
+
+```python
+@dataclass
+class Rule:
+    name: str
+    when: Callable[[View], bool]
+    fn: Callable[[Any, View], Awaitable[Any]]
+    writes: str
+    reads: str = ""
+
+
+def blackboard(*rules: Rule) -> System: ...
+```
+
+`blackboard` collects rules into a runnable `System`, the same kind a flow compiles to.
+
+```python
+from fedotmas.sdk import Rule, blackboard
+
+investigation = blackboard(
+    Rule("hypothesizer",
+         lambda v: v.exists("question") and not v.exists("hypothesis"),
+         hypothesize, writes="hypothesis"),
+    Rule("researcher",
+         lambda v: v.exists("hypothesis") and not v.exists("evidence"),
+         research, writes="evidence"),
+    Rule("verifier",
+         lambda v: v.exists("evidence") and not v.exists("conclusion"),
+         verify, writes="conclusion"),
+)
+```
+
+```
+step 0: ['hypothesizer'] -> ['hypothesis']
+step 1: ['researcher'] -> ['evidence']
+step 2: ['verifier'] -> ['conclusion']
+conclusion: X confirmed
+```
+
+Each rule woke on its own condition, in an order nobody declared. The order fell out of the
+facts, only with the fact bookkeeping handled for you. Inside a blackboard there are no arrow
+types and so no static check; that is the price of an open shape, and the reason to keep
+blackboards for work that genuinely has no fixed topology. To use a goal-terminating blackboard
+as one node in a flow, wrap it with `embed`.
+
 ## When a flow is the wrong shape
 
 A flow is the right tool when the topology is known when you write it: a chain, a fan-out, a
@@ -429,20 +564,27 @@ between them.
 
 | Import                       | What it is                                                   |
 |------------------------------|--------------------------------------------------------------|
-| `dsl.flow.Flow`              | the typed arrow `Flow[A, B]`, a lazy dataflow fragment        |
-| `dsl.flow.action`            | wrap a typed async function as an atom                        |
+| `sdk.Flow`                   | the typed arrow `Flow[A, B]`, a lazy dataflow fragment        |
+| `sdk.action`                 | wrap a typed async function as a mechanical atom              |
+| `sdk.agent`                  | lift a prompt into an LLM atom, `Flow[A, B]` over a `Model`   |
+| `sdk.decision`               | lift a prompt into a router, `Flow[A, str]` over labels       |
+| `sdk.Model`                  | the LLM seam, one async `complete(prompt, input, view)`       |
 | `Flow.__add__` / `.then`     | sequence, `Flow[A, B] + Flow[B, C] -> Flow[A, C]`             |
 | `Flow.__mul__` / `.par`      | parallel product, `-> Flow[A, tuple[B, C]]`                   |
-| `dsl.flow.gather`            | n-ary parallel, `*Flow[A, B] -> Flow[A, list[B]]`            |
-| `dsl.flow.branch`            | route to one case by a label, `-> Flow[A, B]`                |
+| `sdk.gather`                 | n-ary parallel, `*Flow[A, B] -> Flow[A, list[B]]`            |
+| `sdk.branch`                 | route to one case by a label, `-> Flow[A, B]`                |
 | `Flow.loop`                  | iterate a state-preserving flow, `Flow[A, A] -> Flow[A, A]`   |
-| `dsl.flow.embed`             | run a whole sub-system as one typed node                     |
+| `sdk.embed`                  | run a whole sub-system as one typed node                     |
 | `Flow.system`                | compile to a runnable `System`, given `entry` and `out` tags |
+| `sdk.Rule`                   | a condition plus a step, the unit of the rule surface         |
+| `sdk.blackboard`             | collect rules into a runnable `System`                        |
 
 Things to keep in mind:
 
 - A flow is lazy. It allocates agents and tags only at `.system(entry, out)`, so it is free to
   reuse and nest.
+- An atom is a function (`action`) or a prompt over a `Model` (`agent`, `decision`). Both are
+  the same `Flow` and compose alike, and the SDK never imports an LLM provider.
 - The types are a design-time contract. They are checked before the run and are `Any` at
   runtime, which is why the function signatures should be honest.
 - `+` and `.loop` enforce their stitch crisply. `branch` is looser, keep its cases homogeneous.

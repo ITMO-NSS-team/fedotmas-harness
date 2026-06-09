@@ -7,8 +7,7 @@ The blackboard runs in its own inner store to its goal; outside it is one opaque
 
 import asyncio
 
-from fedotmas.dsl.flow import Flow, action, embed
-from fedotmas.dsl.rules import Rule, blackboard
+from fedotmas.sdk import Flow, Rule, action, blackboard, embed
 from fedotmas.engine.contract import Fact, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store

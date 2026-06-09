@@ -1,13 +1,13 @@
 """blackboard: agents self-activate on author-written conditions, no edges.
 
 Same shape as the hand-written engine/blackboard.py. Each Rule carries its own `when`
-predicate, the helper owns the Result/Fact. The combinators cannot express this: there
+predicate, the helper owns the Result/Fact. The arrows cannot express this: there
 is no fixed topology, activation is opportunistic.
 """
 
 import asyncio
 
-from fedotmas.dsl.rules import Rule, blackboard
+from fedotmas.sdk import Rule, blackboard
 from fedotmas.engine.contract import Fact, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store

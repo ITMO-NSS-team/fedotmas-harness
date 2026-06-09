@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Protocol, TypeVar, overload
 
 from fedotmas.adapters import as_agent
 from fedotmas.engine.contract import Agent, Fact, Result, View
@@ -29,6 +29,10 @@ B = TypeVar("B")
 C = TypeVar("C")
 
 ActionFn = Callable[[A, View], Awaitable[B]]
+
+
+class Model(Protocol):
+    async def complete(self, prompt: str, input: Any, view: View) -> Any: ...
 
 
 @dataclass
@@ -189,7 +193,9 @@ class _Loop(Flow[Any, Any]):
 
 class _Branch(Flow[Any, Any]):
     def __init__(
-        self, select: Callable[[Any], str], cases: dict[str, Flow[Any, Any]]
+        self,
+        select: Flow[Any, Any] | Callable[[Any], str],
+        cases: dict[str, Flow[Any, Any]],
     ) -> None:
         self._select = select
         self._cases = cases
@@ -199,12 +205,24 @@ class _Branch(Flow[Any, Any]):
         out = name
         ins = {k: f"{name}:in:{k}" for k in self._cases}
         select = self._select
+        agents: list[Agent] = []
+
+        label_tag = ""
+        classify: Callable[[Any], str] | None = None
+        if isinstance(select, Flow):
+            sel_agents, label_tag = select._build(ctx, entry)
+            agents.extend(sel_agents)
+            route_reads = label_tag
+        else:
+            classify = select
+            route_reads = entry
 
         async def route(input: Any, view: View) -> Result:
             value = view.value(entry) if entry else None
-            return Result(writes=[Fact(tag=ins[select(value)], value=value)])
+            key = classify(value) if classify is not None else view.value(label_tag)
+            return Result(writes=[Fact(tag=ins[key], value=value)])
 
-        agents: list[Agent] = [as_agent(route, name=f"{name}:route", reads=entry)]
+        agents.append(as_agent(route, name=f"{name}:route", reads=route_reads))
         for k, case in self._cases.items():
             case_agents, case_out = case._build(ctx, ins[k])
             agents.extend(case_agents)
@@ -212,7 +230,9 @@ class _Branch(Flow[Any, Any]):
         return agents, out
 
 
-def branch(select: Callable[[A], str], cases: dict[str, Flow[A, B]]) -> Flow[A, B]:
+def branch(
+    select: Flow[A, str] | Callable[[A], str], cases: dict[str, Flow[A, B]]
+) -> Flow[A, B]:
     return _Branch(select, cases)
 
 
@@ -237,6 +257,76 @@ def gather(*flows: Flow[A, B]) -> Flow[A, list[B]]:
 
 def action(fn: ActionFn[A, B]) -> Flow[A, B]:
     return _Action(getattr(fn, "__name__", "action"), fn)
+
+
+@overload
+def agent(
+    name: str, *, prompt: str, model: Model | None = ..., role: str = ...
+) -> Flow[str, str]: ...
+@overload
+def agent(
+    name: str,
+    *,
+    prompt: str,
+    takes: type[A],
+    returns: type[B],
+    model: Model | None = ...,
+    role: str = ...,
+) -> Flow[A, B]: ...
+def agent(
+    name: str,
+    *,
+    prompt: str,
+    takes: type = str,
+    returns: type = str,
+    model: Model | None = None,
+    role: str = "",
+) -> Flow[Any, Any]:
+    async def invoke(input: Any, view: View) -> Any:
+        if model is None:
+            raise RuntimeError(f"agent {name!r} has no model bound")
+        return await model.complete(prompt, input, view)
+
+    return _Action(name, invoke)
+
+
+@overload
+def decision(
+    name: str,
+    *,
+    prompt: str,
+    labels: list[str],
+    model: Model | None = ...,
+    role: str = ...,
+) -> Flow[str, str]: ...
+@overload
+def decision(
+    name: str,
+    *,
+    prompt: str,
+    labels: list[str],
+    takes: type[A],
+    model: Model | None = ...,
+    role: str = ...,
+) -> Flow[A, str]: ...
+def decision(
+    name: str,
+    *,
+    prompt: str,
+    labels: list[str],
+    takes: type = str,
+    model: Model | None = None,
+    role: str = "",
+) -> Flow[Any, str]:
+    async def invoke(input: Any, view: View) -> Any:
+        if model is None:
+            raise RuntimeError(f"decision {name!r} has no model bound")
+        label = await model.complete(prompt, input, view)
+        if label not in labels:
+            raise ValueError(f"decision {name!r} returned {label!r} not in {labels}")
+        return label
+
+    return _Action(name, invoke)
 
 
 class _Embed(Flow[A, B]):

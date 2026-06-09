@@ -4,11 +4,11 @@ Organized by layer, lowest to highest.
 
 - `engine/` raw engine. Patterns built directly on the `Agent` contract with hand-written
   triggers. These are the universality proof and double as reference implementations.
-- `flow/` the edge surface as typed arrows (`dsl.flow`). A `Flow[A, B]` composes with
+- `flow/` the edge surface as typed arrows (`fedotmas.sdk`). A `Flow[A, B]` composes with
   `+` (sequence), `*` / `gather` (parallel), `branch`, `.loop`, and `embed`, and the type
   parameters make the stitch checkable by `ty`. This is the whole edge surface; it
   replaced the earlier flat combinators, which could not nest.
-- `presets/` the rule surface (`dsl.rules`) and, later, named pattern constructors built
+- `presets/` the rule surface (`fedotmas.sdk`) and, later, named pattern constructors built
   on top. A rule pairs an author-written condition with a step; there is no shape to
   derive a trigger from, so the author writes it. This is the blackboard superset the
   arrows cannot express.
