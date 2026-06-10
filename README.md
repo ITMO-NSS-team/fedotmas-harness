@@ -1,6 +1,6 @@
 # fedotmas
 
-Agent systems generation and harness: a tiny BSP engine plus a typed SDK on top.
+Agent systems generation and harness: a tiny orchestration engine plus a typed SDK on top.
 
 ```python
 from fedotmas.sdk import agent
@@ -9,7 +9,7 @@ from fedotmas.adapters.pydantic_ai import PydanticAI
 outline = agent("outline", prompt="Give a 3-bullet outline for the topic.")
 draft = agent("draft", prompt="Write one vivid paragraph from the outline.")
 
-run = await (outline + draft).run("why blackboards", llm=PydanticAI("openai-responses:gpt-4o-mini"))
+run = await (outline + draft).run("heralt of rivia", llm=PydanticAI("openai-responses:gpt-4o-mini"))
 print(run.value)
 ```
 
