@@ -166,7 +166,7 @@ def agent(
     prompt: str,
     labels: list[str],
     input: str | None = ...,
-    takes: type[A] = ...,
+    takes: type[A] = ...,  # type: ignore
     llm: LLM | None = ...,
 ) -> Flow[A, str]: ...
 @overload
@@ -233,7 +233,7 @@ def agent(
                 "combine with returns= or merge= (into= is fine: the label lands in state)"
             )
         # built via __getitem__ because the labels are runtime data, not a static type form
-        lit = Literal.__getitem__(tuple(labels))
+        lit = Literal.__getitem__(tuple(labels))  # type: ignore
         return _LLMAtom(
             name,
             prompt=prompt,

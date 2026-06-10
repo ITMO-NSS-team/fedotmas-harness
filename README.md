@@ -17,6 +17,6 @@ Docs: [sdk](docs/sdk.md) (start here), [engine](docs/engine.md) (under the hood)
 
 Planned, not in the tree yet (placeholder packages removed until real):
 
-- v0.1 - `dsl`: the spec language and compiler, wrappers for other frameworks and any agents and converting to dsl. `meta-agent` - selection pattern of the MAS by provided task features
+- v0.1 - `dsl`: the spec language and compiler, wrappers for other frameworks and any agents and converting to dsl. `meta-agent` - selection pattern of a MAS by provided task features
 - v0.2 - `reliability`: retries, fallback, routing?
 - v0.2 - `memory`: runtime and persistence memory
