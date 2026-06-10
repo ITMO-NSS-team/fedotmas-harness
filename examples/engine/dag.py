@@ -2,7 +2,7 @@
 
 import asyncio
 
-from fedotmas.adapters import as_agent
+from fedotmas.adapters import as_node
 from fedotmas.engine.contract import Fact, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
@@ -29,11 +29,11 @@ async def d(input: object, view: View) -> Result:
 
 async def main() -> None:
     system = System(
-        agents=[
-            as_agent(a, name="a", reads="in"),
-            as_agent(b, name="b", reads="out:a"),
-            as_agent(c, name="c", reads="out:a"),
-            as_agent(
+        nodes=[
+            as_node(a, name="a", reads="in"),
+            as_node(b, name="b", reads="out:a"),
+            as_node(c, name="c", reads="out:a"),
+            as_node(
                 d,
                 name="d",
                 reads="out:*",

@@ -2,7 +2,7 @@
 
 import asyncio
 
-from fedotmas.adapters import as_agent
+from fedotmas.adapters import as_node
 from fedotmas.engine.contract import Fact, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
@@ -38,10 +38,10 @@ def both_spoke(v: View) -> bool:
 
 async def main() -> None:
     system = System(
-        agents=[
-            as_agent(pro, name="pro", reads="verdict:*", trigger=opened),
-            as_agent(con, name="con", reads="verdict:*", trigger=opened),
-            as_agent(judge, name="judge", reads="pro:*", trigger=both_spoke),
+        nodes=[
+            as_node(pro, name="pro", reads="verdict:*", trigger=opened),
+            as_node(con, name="con", reads="verdict:*", trigger=opened),
+            as_node(judge, name="judge", reads="pro:*", trigger=both_spoke),
         ]
     )
     store = Store()

@@ -1,4 +1,4 @@
-"""Superstep loop, Run and StepReport."""
+"""Run reporting: StepReport per superstep, Run for the whole execution."""
 
 from __future__ import annotations
 

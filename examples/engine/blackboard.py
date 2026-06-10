@@ -2,7 +2,7 @@
 
 import asyncio
 
-from fedotmas.adapters import as_agent
+from fedotmas.adapters import as_node
 from fedotmas.engine.contract import Fact, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
@@ -24,20 +24,20 @@ async def verify(input: object, view: View) -> Result:
 
 async def main() -> None:
     system = System(
-        agents=[
-            as_agent(
+        nodes=[
+            as_node(
                 hypothesize,
                 name="hypothesizer",
                 reads="question",
                 trigger=lambda v: v.exists("question") and not v.exists("hypothesis"),
             ),
-            as_agent(
+            as_node(
                 research,
                 name="researcher",
                 reads="hypothesis",
                 trigger=lambda v: v.exists("hypothesis") and not v.exists("evidence"),
             ),
-            as_agent(
+            as_node(
                 verify,
                 name="verifier",
                 reads="evidence",

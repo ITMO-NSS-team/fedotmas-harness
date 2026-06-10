@@ -2,7 +2,7 @@
 
 import asyncio
 
-from fedotmas.adapters import as_agent
+from fedotmas.adapters import as_node
 from fedotmas.engine.contract import Fact, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
@@ -26,10 +26,10 @@ async def edit(input: object, view: View) -> Result:
 
 async def main() -> None:
     system = System(
-        agents=[
-            as_agent(research, name="researcher", reads="topic"),
-            as_agent(write, name="writer", reads="research"),
-            as_agent(edit, name="editor", reads="draft"),
+        nodes=[
+            as_node(research, name="researcher", reads="topic"),
+            as_node(write, name="writer", reads="research"),
+            as_node(edit, name="editor", reads="draft"),
         ]
     )
     store = Store()

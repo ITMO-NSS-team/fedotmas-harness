@@ -1,4 +1,9 @@
-"""Agent contract: the Protocol and message types (Result, Card, Fact, Control, Status, Usage, View)."""
+"""Node contract: the Protocol and message types (Result, Card, Fact, Status, View).
+
+The unit of execution is a Node, not an "agent": the engine does not care whether a node
+wraps an LLM agent, a plain function, or a whole sub-system, and the SDK reserves the word
+agent for the LLM-backed atom specifically.
+"""
 
 from __future__ import annotations
 
@@ -13,11 +18,6 @@ class Status(str, Enum):
     ERROR = "error"
 
 
-class Usage(BaseModel):
-    tokens: int = 0
-    cost: float = 0.0
-
-
 class Fact(BaseModel):
     tag: str
     value: Any = None
@@ -30,27 +30,16 @@ class Fact(BaseModel):
         return (self.tag, self.step)
 
 
-class Control(BaseModel):
-    next: str | None = None
-    subtasks: list[Any] | None = None
-    done: bool = False
-
-
 class Card(BaseModel):
     name: str
     description: str = ""
-    input_schema: dict[str, Any] = Field(default_factory=dict)
-    capabilities: list[str] = Field(default_factory=list)
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
 class Result(BaseModel):
-    payload: Any = None
     status: Status = Status.OK
     error: str | None = None
-    usage: Usage | None = None
     writes: list[Fact] = Field(default_factory=list)
-    control: Control | None = None
 
 
 @runtime_checkable
@@ -63,7 +52,7 @@ class View(Protocol):
 
 
 @runtime_checkable
-class Agent(Protocol):
+class Node(Protocol):
     name: str
     reads: str
 

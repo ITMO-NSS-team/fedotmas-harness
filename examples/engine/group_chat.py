@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from fedotmas.adapters import as_agent
+from fedotmas.adapters import as_node
 from fedotmas.engine.contract import Fact, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
@@ -36,15 +36,15 @@ def my_turn(name: str) -> Callable[[View], bool]:
 
 async def main() -> None:
     system = System(
-        agents=[
-            as_agent(
+        nodes=[
+            as_node(
                 manage,
                 name="manager",
                 reads="msg:*",
                 trigger=lambda v: v.count("turn:*") == v.count("msg:*"),
             ),
             *(
-                as_agent(speaker(n), name=n, reads="turn:*", trigger=my_turn(n))
+                as_node(speaker(n), name=n, reads="turn:*", trigger=my_turn(n))
                 for n in SPEAKERS
             ),
         ]

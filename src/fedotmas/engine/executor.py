@@ -8,7 +8,7 @@ from typing import Protocol
 
 from fedotmas.engine.contract import Fact, Status
 from fedotmas.engine.policy import FireAll, Policy
-from fedotmas.engine.scheduler import Run, StepReport
+from fedotmas.engine.report import Run, StepReport
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
 from fedotmas.engine.terminate import Terminate
@@ -67,41 +67,39 @@ class ReactiveExecutor:
             view = store.snapshot()
             ready = []
             matched: dict[str, tuple[list[Fact], tuple]] = {}
-            for agent in system.agents:
-                if not agent.trigger(view):
+            for node in system.nodes:
+                if not node.trigger(view):
                     continue
-                facts = view.query(agent.reads) if agent.reads else []
-                mkey = (agent.name, frozenset(f.key for f in facts))
+                facts = view.query(node.reads) if node.reads else []
+                mkey = (node.name, frozenset(f.key for f in facts))
                 if mkey in fired:
                     continue
-                ready.append(agent)
-                matched[agent.name] = (facts, mkey)
+                ready.append(node)
+                matched[node.name] = (facts, mkey)
             ready = active.select(ready, view)
             if not ready:
                 yield StepReport(step, [], [])
                 return
             results = await asyncio.gather(
-                *(agent.invoke(matched[agent.name][0], view) for agent in ready),
+                *(node.invoke(matched[node.name][0], view) for node in ready),
                 return_exceptions=True,
             )
             writes: list[Fact] = []
             errors: list[Fact] = []
-            for agent, result in zip(ready, results):
-                fired.add(matched[agent.name][1])
+            for node, result in zip(ready, results):
+                fired.add(matched[node.name][1])
                 if isinstance(result, BaseException):
                     if not isinstance(result, Exception):
                         raise result
                     errors.append(
-                        _error_fact(
-                            agent.name, str(result), step, type(result).__name__
-                        )
+                        _error_fact(node.name, str(result), step, type(result).__name__)
                     )
                     continue
                 if result.status is Status.ERROR:
-                    errors.append(_error_fact(agent.name, result.error or "", step))
-                writes.extend(_stamp(result.writes, agent.name, step))
+                    errors.append(_error_fact(node.name, result.error or "", step))
+                writes.extend(_stamp(result.writes, node.name, step))
             store.commit([*writes, *errors])
-            report = StepReport(step, [agent.name for agent in ready], writes, errors)
+            report = StepReport(step, [node.name for node in ready], writes, errors)
             yield report
             if errors:
                 return

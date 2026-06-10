@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from fedotmas.adapters import as_agent
+from fedotmas.adapters import as_node
 from fedotmas.engine.contract import Fact, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
@@ -33,10 +33,10 @@ async def join(input: object, view: View) -> Result:
 
 async def main() -> None:
     system = System(
-        agents=[
-            as_agent(split, name="splitter", reads="task"),
-            *(as_agent(worker(p), name=p, reads=f"part:{p}") for p in PARTS),
-            as_agent(
+        nodes=[
+            as_node(split, name="splitter", reads="task"),
+            *(as_node(worker(p), name=p, reads=f"part:{p}") for p in PARTS),
+            as_node(
                 join,
                 name="join",
                 reads="out:*",

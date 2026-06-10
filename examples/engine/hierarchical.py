@@ -6,7 +6,7 @@ dropped into an outer System. Nesting is free because a subgraph is just an agen
 
 import asyncio
 
-from fedotmas.adapters import as_agent
+from fedotmas.adapters import as_node
 from fedotmas.engine.contract import Card, Fact, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
@@ -28,10 +28,10 @@ async def summarize(input: object, view: View) -> Result:
 
 
 RESEARCH_TEAM = System(
-    agents=[
-        as_agent(search_a, name="searcher_a", reads="task"),
-        as_agent(search_b, name="searcher_b", reads="task"),
-        as_agent(
+    nodes=[
+        as_node(search_a, name="searcher_a", reads="task"),
+        as_node(search_b, name="searcher_b", reads="task"),
+        as_node(
             summarize,
             name="summarizer",
             reads="found:*",
@@ -73,9 +73,9 @@ async def finalize(input: object, view: View) -> Result:
 
 async def main() -> None:
     system = System(
-        agents=[
+        nodes=[
             Team("research_team", RESEARCH_TEAM, reads="brief", out="team_out"),
-            as_agent(finalize, name="finalizer", reads="team_out"),
+            as_node(finalize, name="finalizer", reads="team_out"),
         ]
     )
     store = Store()

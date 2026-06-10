@@ -2,7 +2,12 @@
 
 The engine is the part of fedotmas that actually runs a multi-agent system. It has no
 notion of graphs, prompts, or LLMs. It knows three things: a shared store of facts, a set
-of agents that read and write those facts, and a loop that decides who runs next.
+of **nodes** that read and write those facts, and a loop that decides who runs next.
+
+A note on the word: this page says "agent" for the things acting on the store, because that
+is what they are in a multi-agent system. But the contract they implement is called `Node`,
+deliberately. The engine does not care whether a node wraps an LLM agent, a plain function,
+or a whole team; the SDK reserves the word agent for its LLM-backed atom specifically.
 
 Everything else in the framework (the DSL, the pattern presets) is a way to produce input
 for this engine. If you understand the engine, you understand the runtime.
@@ -34,12 +39,8 @@ what it reads, and the data dependency creates the order.
 ```python
 import asyncio
 
-from fedotmas.adapters import as_agent
-from fedotmas.engine.contract import Fact, Result, View
-from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.store import Store
-from fedotmas.engine.system import System
-from fedotmas.engine.terminate import Goal
+from fedotmas.adapters import as_node
+from fedotmas.engine import Fact, Goal, ReactiveExecutor, Result, Store, System, View
 
 
 async def research(input: object, view: View) -> Result:
@@ -55,10 +56,10 @@ async def edit(input: object, view: View) -> Result:
 
 
 async def main() -> None:
-    system = System(agents=[
-        as_agent(research, name="researcher", reads="topic"),
-        as_agent(write, name="writer", reads="research"),
-        as_agent(edit, name="editor", reads="draft"),
+    system = System(nodes=[
+        as_node(research, name="researcher", reads="topic"),
+        as_node(write, name="writer", reads="research"),
+        as_node(edit, name="editor", reads="draft"),
     ])
     store = Store()
     async for report in ReactiveExecutor().stream(
@@ -140,13 +141,13 @@ which is why `view.query("draft:*")[-1]` is a common way to reach the newest dra
     of one agent in parallel, they cannot count each other. Give each copy its own identity
     rather than deriving one from `view.count(...)` at runtime.
 
-## Agent
+## Node
 
-An agent is anything that satisfies this contract. It is a `Protocol`, so there is no base
+A node is anything that satisfies this contract. It is a `Protocol`, so there is no base
 class to inherit and no registration step.
 
 ```python
-class Agent(Protocol):
+class Node(Protocol):
     name: str
     reads: str
 
@@ -155,24 +156,24 @@ class Agent(Protocol):
     def describe(self) -> Card: ...
 ```
 
-- `name` identifies the agent and stamps every fact it writes.
-- `reads` is the pattern of facts this agent consumes. The engine queries it to decide what
-  to pass as `input` and to track what the agent has already seen.
-- `trigger(view)` returns `True` when the agent wants to run, given the current snapshot.
-- `invoke(input, view)` does the work and returns a `Result`. It is `async`, so an agent is
+- `name` identifies the node and stamps every fact it writes.
+- `reads` is the pattern of facts this node consumes. The engine queries it to decide what
+  to pass as `input` and to track what the node has already seen.
+- `trigger(view)` returns `True` when the node wants to run, given the current snapshot.
+- `invoke(input, view)` does the work and returns a `Result`. It is `async`, so a node is
   free to call an LLM, hit the network, or just compute.
 - `describe()` returns a `Card` with metadata. Not used by the loop itself.
 
-To the engine an agent is a black box. It can wrap a single function, an LLM call, an entire
+To the engine a node is a black box. It can wrap a single function, an LLM call, an entire
 external framework, or even another fedotmas system (see
 [Nesting](#nesting-a-system-is-an-agent)).
 
-### as_agent
+### as_node
 
-You rarely write the protocol by hand. `as_agent` wraps an async function into an agent.
+You rarely write the protocol by hand. `as_node` wraps an async function into a node.
 
 ```python
-def as_agent(fn, *, name, reads="", trigger=None) -> Agent: ...
+def as_node(fn, *, name, reads="", trigger=None) -> Node: ...
 ```
 
 `fn` has the signature `async (input, view) -> Result`. If you do not pass a `trigger`, the
@@ -180,8 +181,8 @@ default is "fire when at least one fact matches `reads`":
 
 ```python
 # these are the same agent
-as_agent(write, name="writer", reads="research")
-as_agent(write, name="writer", reads="research",
+as_node(write, name="writer", reads="research")
+as_node(write, name="writer", reads="research",
          trigger=lambda v: v.exists("research"))
 ```
 
@@ -190,38 +191,33 @@ conditional you pass an explicit `trigger`, covered below.
 
 ## Result
 
-`invoke` returns a `Result`. The only field the engine acts on is `writes`.
+`invoke` returns a `Result`. The field the engine acts on is `writes`.
 
 ```python
 class Result(BaseModel):
-    payload: Any = None
     status: Status = Status.OK
     error: str | None = None
-    usage: Usage | None = None
     writes: list[Fact] = Field(default_factory=list)
-    control: Control | None = None
 ```
 
 `writes` is the single channel through which an agent changes the world. There is no other
 way to affect state or to influence what runs next. Want to hand control to another agent?
 Write a fact that its trigger is watching for. Want to stop? Write the fact your terminate
 condition checks. Routing, handoff, spawning subtasks: all of it is "write a fact that some
-trigger reads". The `control` field exists for ergonomic sugar over this and is not used by
-the current engine.
+trigger reads".
 
 `status` and `error` are how an agent reports failure without raising: return
 `Status.ERROR` and the engine treats it exactly like a raised exception (see
-[Errors](#errors)). `payload` and `usage` are for reporting and reliability middleware and
-do not affect the loop.
+[Errors](#errors)).
 
 ## System
 
-A `System` is just the bag of agents you want to run together.
+A `System` is just the bag of nodes you want to run together.
 
 ```python
 @dataclass
 class System:
-    agents: list[Agent]
+    nodes: list[Node]
 ```
 
 There are no edges in it. The wiring lives inside each agent's `reads` and `trigger`. Two
@@ -343,7 +339,7 @@ trigger for loops and joins. Here is a join, where the aggregator should wait fo
 upstream facts before running:
 
 ```python
-as_agent(join, name="aggregator", reads="out:*",
+as_node(join, name="aggregator", reads="out:*",
          trigger=lambda v: v.count("out:*") == 3)
 ```
 
@@ -362,7 +358,7 @@ runs a scoring function over the ready set and fires only the single highest bid
 how a contract-net auction picks a winner:
 
 ```python
-from fedotmas.engine.policy import AuctionSelect
+from fedotmas.engine import AuctionSelect
 
 BIDS = {"w1": 0.3, "w2": 0.9, "w3": 0.5}
 
@@ -387,7 +383,7 @@ class Terminate(Protocol):
 Three are built in:
 
 ```python
-from fedotmas.engine.terminate import Goal, Budget, Quiescence
+from fedotmas.engine import Budget, Goal, Quiescence
 
 Goal(lambda v: v.exists("final"))   # stop when a predicate over the store holds
 Budget(max_steps=8)                 # stop after N supersteps
@@ -413,12 +409,8 @@ same engine, the only new ingredients are explicit triggers and a composed termi
 ```python
 import asyncio
 
-from fedotmas.adapters import as_agent
-from fedotmas.engine.contract import Fact, Result, View
-from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.store import Store
-from fedotmas.engine.system import System
-from fedotmas.engine.terminate import Budget, Goal
+from fedotmas.adapters import as_node
+from fedotmas.engine import Budget, Fact, Goal, ReactiveExecutor, Result, Store, System, View
 
 THRESHOLD = 3
 
@@ -449,9 +441,9 @@ def approved(view: View) -> bool:
 
 
 async def main() -> None:
-    system = System(agents=[
-        as_agent(generate, name="generator", reads="verdict:*", trigger=generate_trigger),
-        as_agent(critique, name="critic", reads="draft:*", trigger=critique_trigger),
+    system = System(nodes=[
+        as_node(generate, name="generator", reads="verdict:*", trigger=generate_trigger),
+        as_node(critique, name="critic", reads="draft:*", trigger=critique_trigger),
     ])
     store = Store()
     async for report in ReactiveExecutor().stream(
@@ -511,17 +503,21 @@ works at every level.
 
 ## Reference
 
+Everything below re-exports flat from `fedotmas.engine`, e.g.
+`from fedotmas.engine import Fact, System, ReactiveExecutor, Goal`.
+
 | Import                                  | What it is                                  |
 |-----------------------------------------|---------------------------------------------|
-| `engine.contract.Fact`                  | tagged immutable value, the unit of state   |
-| `engine.contract.Result`               | what `invoke` returns, `writes` is the channel |
-| `engine.contract.View` / `Agent`        | the read snapshot and the agent protocol    |
-| `engine.store.Store`                    | the shared blackboard                       |
-| `engine.system.System`                  | the set of agents to run                    |
-| `engine.executor.ReactiveExecutor`      | the superstep loop, `stream` and `run`      |
-| `engine.policy.FireAll` / `AuctionSelect` | resolve who fires in a step               |
-| `engine.terminate.Goal` / `Budget` / `Quiescence` | when to stop, composable with `&` `|` |
-| `adapters.as_agent`                     | wrap an async function as an agent          |
+| `engine.Fact`                           | tagged immutable value, the unit of state   |
+| `engine.Result`                         | what `invoke` returns, `writes` is the channel |
+| `engine.View` / `Node`                  | the read snapshot and the node protocol     |
+| `engine.Store`                          | the shared blackboard                       |
+| `engine.System`                         | the set of nodes to run                     |
+| `engine.ReactiveExecutor`               | the superstep loop, `stream` and `run`      |
+| `engine.Run` / `StepReport`             | the trace: status, reason, fired, writes, errors |
+| `engine.FireAll` / `AuctionSelect`      | resolve who fires in a step                 |
+| `engine.Goal` / `Budget` / `Quiescence` | when to stop, composable with `&` `|`       |
+| `adapters.as_node`                      | wrap an async function as a node            |
 
 Things to keep in mind:
 

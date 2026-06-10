@@ -2,8 +2,8 @@
 
 ## engine/
 
-Every file runs the **same** `ReactiveExecutor` over the **same** `Store` + `Agent`
-contract. Nothing in the engine changes between patterns, only the agents, their triggers,
+Every file runs the **same** `ReactiveExecutor` over the **same** `Store` + `Node`
+contract. Nothing in the engine changes between patterns, only the nodes, their triggers,
 the `Policy`, and the `Terminate` condition differ. That is the universality claim, checked
 on running code.
 
@@ -35,7 +35,7 @@ emergent activation. Every file compiles to the same engine `System` and streams
 
 | Shape | File | Surface |
 |---|---|---|
-| atom factories | `sdk/factories.py` | `action`, `agent`, `decision` lift leaves into `Flow` |
+| atom factories | `sdk/factories.py` | `action` (code) and `agent` (LLM, incl. `labels` classifier) lift leaves into `Flow` |
 | stateful atoms + run | `sdk/state.py` | `input=` templates, `into`/`merge`, `branch("key")`, `.loop("key")`, `Flow.run` |
 | seq, parallel-into-seq | `sdk/composition.py` | `a + b + c`, `(a * b) + c` |
 | loop (reflection, eval-optimizer) | `sdk/loop.py` | `body.loop(until)` |
@@ -56,6 +56,6 @@ cover all of it. Needs an OpenAI key in `.env`; run with the examples group, e.g
 | Shape | File | SDK surface |
 |---|---|---|
 | DAG with a parallel block | `sdk-llm/dag.py` | stateless arrows: `extract + (support * oppose) + balance`, `Flow.run` and `FlowRun` |
-| Blackboard | `sdk-llm/blackboard.py` | declarative prompt rules (`Rule(prompt=...)`), opportunistic `when`, `input` template over store tags, raw engine run |
+| Blackboard | `sdk-llm/blackboard.py` | declarative prompt rules (`rule(prompt=...)`), opportunistic `when`, `input` template over store tags, `board.run` |
 | Master orchestrator | `sdk-llm/orchestrator.py` | structured plan sized at runtime, `action` as the code escape hatch for dynamic fan-out |
 | Handoff / Swarm | `sdk-llm/swarm.py` | stateful atoms end to end: `input=` templates, `merge=` structured handoff, `branch("station")` inside `.loop(until="done")` |

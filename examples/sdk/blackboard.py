@@ -1,19 +1,17 @@
-"""blackboard: agents self-activate on author-written conditions, no edges.
+"""blackboard: rules self-activate on author-written conditions, no edges.
 
-Same shape as the hand-written engine/blackboard.py. These three are a linear chain, so they
-lean on the produce-once default (fire when `reads` is present and `writes` is not yet) and
-need no explicit trigger. The arrows still cannot express the surface in general: activation is
-opportunistic, write `when` once a rule depends on more than one read. See sdk-llm/blackboard.py
-for a genuinely non-linear case.
+Same shape as the hand-written engine/blackboard.py. A rule is a self-activating node; these
+three are a linear chain, so they lean on the produce-once default (fire when `reads` is
+present and `writes` is not yet) and need no explicit trigger. The arrows still cannot express
+the surface in general: activation is opportunistic, write `when` once a rule depends on more
+than one read. See sdk-llm/blackboard.py for a genuinely non-linear case. blackboard() returns
+a Board; board.run derives the store and the terminate condition from the seed and the goal.
 """
 
 import asyncio
 
-from fedotmas.sdk import Rule, blackboard
-from fedotmas.engine.contract import Fact, View
-from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.store import Store
-from fedotmas.engine.terminate import Goal
+from fedotmas.engine.contract import View
+from fedotmas.sdk import blackboard, rule
 
 
 async def hypothesize(input: object, view: View) -> str:
@@ -29,21 +27,16 @@ async def verify(input: object, view: View) -> str:
 
 
 async def main() -> None:
-    system = blackboard(
-        Rule("hypothesizer", hypothesize, writes="hypothesis", reads="question"),
-        Rule("researcher", research, writes="evidence", reads="hypothesis"),
-        Rule("verifier", verify, writes="conclusion", reads="evidence"),
+    board = blackboard(
+        rule("hypothesizer", hypothesize, writes="hypothesis", reads="question"),
+        rule("researcher", research, writes="evidence", reads="hypothesis"),
+        rule("verifier", verify, writes="conclusion", reads="evidence"),
     )
-    store = Store()
-    stream = ReactiveExecutor().stream(
-        system,
-        store,
-        seed=[Fact(tag="question", value="what is it?")],
-        terminate=Goal(lambda v: v.exists("conclusion")),
-    )
-    async for r in stream:
+    run = await board.run({"question": "what is it?"}, goal="conclusion")
+    for r in run.steps:
         print(f"step {r.step}: {r.fired} -> {[f.tag for f in r.writes]}")
-    print("conclusion:", store.snapshot().value("conclusion"))
+    assert run.ok and run.value == "X confirmed", (run.reason, run.value)
+    print("conclusion:", run.value)
 
 
 if __name__ == "__main__":

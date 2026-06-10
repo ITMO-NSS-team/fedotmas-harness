@@ -5,7 +5,7 @@ Same loop as Evaluator-Optimizer, with the critic folded into the generator.
 
 import asyncio
 
-from fedotmas.adapters import as_agent
+from fedotmas.adapters import as_node
 from fedotmas.engine.contract import Fact, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
@@ -29,7 +29,7 @@ def below_bar(v: View) -> bool:
 
 async def main() -> None:
     system = System(
-        agents=[as_agent(revise, name="reviser", reads="draft:*", trigger=below_bar)]
+        nodes=[as_node(revise, name="reviser", reads="draft:*", trigger=below_bar)]
     )
     store = Store()
     stream = ReactiveExecutor().stream(

@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from fedotmas.adapters import as_agent
+from fedotmas.adapters import as_node
 from fedotmas.engine.contract import Fact, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
@@ -28,15 +28,15 @@ def routed(label: str) -> Callable[[View], bool]:
 
 async def main() -> None:
     system = System(
-        agents=[
-            as_agent(classify, name="classifier", reads="q"),
-            as_agent(
+        nodes=[
+            as_node(classify, name="classifier", reads="q"),
+            as_node(
                 handler("code"), name="coder", reads="route", trigger=routed("code")
             ),
-            as_agent(
+            as_node(
                 handler("prose"), name="writer", reads="route", trigger=routed("prose")
             ),
-            as_agent(
+            as_node(
                 handler("math"), name="solver", reads="route", trigger=routed("math")
             ),
         ]

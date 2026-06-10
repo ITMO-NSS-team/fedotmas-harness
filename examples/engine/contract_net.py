@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from fedotmas.adapters import as_agent
+from fedotmas.adapters import as_node
 from fedotmas.engine.contract import Fact, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.policy import AuctionSelect
@@ -32,8 +32,8 @@ def open_task(v: View) -> bool:
 
 async def main() -> None:
     system = System(
-        agents=[
-            as_agent(worker(n), name=n, reads="task", trigger=open_task) for n in BIDS
+        nodes=[
+            as_node(worker(n), name=n, reads="task", trigger=open_task) for n in BIDS
         ]
     )
     store = Store()

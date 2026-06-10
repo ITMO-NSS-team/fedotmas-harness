@@ -7,7 +7,7 @@ bounded worker pool; here one worker batch-maps the runtime-sized set.
 
 import asyncio
 
-from fedotmas.adapters import as_agent
+from fedotmas.adapters import as_node
 from fedotmas.engine.contract import Fact, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
@@ -35,10 +35,10 @@ async def reduce(input: object, view: View) -> Result:
 
 async def main() -> None:
     system = System(
-        agents=[
-            as_agent(plan, name="planner", reads="goal"),
-            as_agent(work, name="worker", reads="sub:*"),
-            as_agent(
+        nodes=[
+            as_node(plan, name="planner", reads="goal"),
+            as_node(work, name="worker", reads="sub:*"),
+            as_node(
                 reduce,
                 name="reducer",
                 reads="res:*",

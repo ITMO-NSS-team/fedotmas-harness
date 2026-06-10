@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from fedotmas.adapters import as_agent
+from fedotmas.adapters import as_node
 from fedotmas.engine.contract import Fact, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
@@ -30,8 +30,8 @@ def is_active(name: str) -> Callable[[View], bool]:
 
 async def main() -> None:
     system = System(
-        agents=[
-            as_agent(station(n, nxt), name=n, reads="active", trigger=is_active(n))
+        nodes=[
+            as_node(station(n, nxt), name=n, reads="active", trigger=is_active(n))
             for n, nxt in ROUTES.items()
         ]
     )

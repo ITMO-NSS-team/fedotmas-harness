@@ -7,15 +7,16 @@ as one opaque node. The type parameters make each stitch checkable: a + b only t
 b accepts what a produces, so an unjoined parallel (a tuple the next stage must consume) becomes
 a type error, not a runtime footgun.
 
-This module is the algebra only. The leaves that fill it, action (model-free) and agent /
-decision (over the LLM seam), live in atoms; the rule surface in blackboard. Composition is
-lazy: a Flow allocates fact tags and agents only at .system(), so the same fragment can be
-reused and nested. An LLM backend bound at .system() / .run() becomes the default for every
-LLM node that did not bind its own; an unbound node fails there, at compile time, not mid-run.
+This module is the algebra only. The leaves that fill it, action (code) and agent (a prompt
+over the LLM seam), live in atoms; the rule surface in blackboard. Composition is lazy: a
+Flow allocates fact tags and nodes only at .system(), so the same fragment can be reused and
+nested. An LLM backend bound at .system() / .run() becomes the default for every LLM node
+that did not bind its own; an unbound node fails there, at compile time, not mid-run.
 
 Where the algebra takes a predicate or a selector, it also takes a declarative form that a
-program can emit as data: .loop(until=) accepts a state key or a Cond next to a callable, and
-branch(select=) accepts a state key next to a callable or a decision flow.
+program can emit as data: .loop(until=) accepts a state key or a Condition next to a callable,
+and branch(select=) accepts a state key next to a callable or a label-producing flow (an
+agent with labels=).
 """
 
 from __future__ import annotations
@@ -26,10 +27,10 @@ from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel
 
-from fedotmas.adapters import as_agent
-from fedotmas.engine.contract import Agent, Fact, Result, Status, View
+from fedotmas.adapters import as_node
+from fedotmas.engine.contract import Fact, Node, Result, Status, View
 from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.scheduler import Run, StepReport
+from fedotmas.engine.report import Run, StepReport
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
 from fedotmas.engine.terminate import Budget, Goal, Terminate
@@ -37,6 +38,7 @@ from fedotmas.engine.terminate import Budget, Goal, Terminate
 if TYPE_CHECKING:
     from fedotmas.engine.policy import Policy
     from fedotmas.sdk.atoms import LLM
+    from fedotmas.sdk.blackboard import Board
 
 A = TypeVar("A")
 B = TypeVar("B")
@@ -49,11 +51,11 @@ def _pick(state: Any, key: str) -> Any:
     return getattr(state, key, None)
 
 
-class Cond(BaseModel):
+class Condition(BaseModel):
     """A declarative predicate over one key of the state: data, not code, so a program that
     emits systems can express a stop or routing condition without writing a callable. `key`
     is looked up in the state (dict key or attribute, absent reads as None), `op` compares it
-    to `value`. The default op is truthy, so Cond(key="approved") means state["approved"].
+    to `value`. The default op is truthy, so Condition(key="approved") means state["approved"].
     """
 
     key: str
@@ -81,10 +83,12 @@ class Cond(BaseModel):
         return v <= self.value
 
 
-def _as_predicate(until: Callable[[Any], bool] | Cond | str) -> Callable[[Any], bool]:
+def _as_predicate(
+    until: Callable[[Any], bool] | Condition | str,
+) -> Callable[[Any], bool]:
     if isinstance(until, str):
-        until = Cond(key=until)
-    if isinstance(until, Cond):
+        until = Condition(key=until)
+    if isinstance(until, Condition):
         return until.check
     return until
 
@@ -99,26 +103,26 @@ class _Ctx:
         return f"{hint}#{self.n}"
 
 
-def _gather_agent(name: str, srcs: list[str], out: str) -> Agent:
+def _gather_agent(name: str, srcs: list[str], out: str) -> Node:
     async def invoke(input: Any, view: View) -> Result:
         value = tuple(view.value(s) for s in srcs)
         return Result(writes=[Fact(tag=out, value=value)])
 
-    return as_agent(invoke, name=name, trigger=lambda v: all(v.exists(s) for s in srcs))
+    return as_node(invoke, name=name, trigger=lambda v: all(v.exists(s) for s in srcs))
 
 
-def _collect_agent(name: str, srcs: list[str], out: str) -> Agent:
+def _collect_agent(name: str, srcs: list[str], out: str) -> Node:
     async def invoke(input: Any, view: View) -> Result:
         return Result(writes=[Fact(tag=out, value=[view.value(s) for s in srcs])])
 
-    return as_agent(invoke, name=name, trigger=lambda v: all(v.exists(s) for s in srcs))
+    return as_node(invoke, name=name, trigger=lambda v: all(v.exists(s) for s in srcs))
 
 
-def _alias_agent(src: str, out: str, name: str | None = None) -> Agent:
+def _alias_agent(src: str, out: str, name: str | None = None) -> Node:
     async def invoke(input: Any, view: View) -> Result:
         return Result(writes=[Fact(tag=out, value=view.value(src))])
 
-    return as_agent(invoke, name=name or f"alias:{out}", reads=src)
+    return as_node(invoke, name=name or f"alias:{out}", reads=src)
 
 
 def _inner_guard(run: Run, out: str, what: str) -> None:
@@ -175,15 +179,15 @@ class FlowRun:
 
 
 class Flow(Generic[A, B]):
-    """A typed dataflow fragment from input A to output B. Make atoms with action (or agent,
-    decision from atoms), then compose: + is sequence, * and gather_all are parallel, branch routes
+    """A typed dataflow fragment from input A to output B. Make atoms with action (code) or
+    agent (LLM), then compose: + is sequence, * and gather_all are parallel, branch routes
     by label, .loop iterates, nest wraps a whole sub-system as one node. `.system(entry, out)`
     compiles the fragment to an engine System; `.run(value)` compiles and executes it in one
     call. The type parameters check each stitch: a + b only type-checks when b accepts what a
     produces.
     """
 
-    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Agent], str]:
+    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
         raise NotImplementedError
 
     def system(self, *, entry: str, out: str, llm: LLM | None = None) -> System:
@@ -252,9 +256,11 @@ class Flow(Generic[A, B]):
     def par(self, other: Flow[A, C]) -> Flow[A, tuple[B, C]]:
         return _Par(self, other)
 
-    def loop(self: Flow[A, A], until: Callable[[A], bool] | Cond | str) -> Flow[A, A]:
+    def loop(
+        self: Flow[A, A], until: Callable[[A], bool] | Condition | str
+    ) -> Flow[A, A]:
         """Iterate the flow, feeding each round's output in as the next round's input, until
-        `until` clears. `until` is a callable over the state, a Cond, or a state key (stop
+        `until` clears. `until` is a callable over the state, a Condition, or a state key (stop
         when state[key] is truthy)."""
         return _Loop(self, _as_predicate(until))
 
@@ -264,7 +270,7 @@ class _Seq(Flow[Any, Any]):
         self._left = left
         self._right = right
 
-    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Agent], str]:
+    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
         la, lout = self._left._build(ctx, entry)
         ra, rout = self._right._build(ctx, lout)
         return [*la, *ra], rout
@@ -275,7 +281,7 @@ class _Par(Flow[Any, Any]):
         self._left = left
         self._right = right
 
-    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Agent], str]:
+    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
         la, lout = self._left._build(ctx, entry)
         ra, rout = self._right._build(ctx, entry)
         out = ctx.fresh("par")
@@ -287,7 +293,7 @@ class _Loop(Flow[Any, Any]):
         self._body = body
         self._until = until
 
-    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Agent], str]:
+    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
         name = ctx.fresh("loop")
         out = name
         state = f"{name}:s"
@@ -327,13 +333,13 @@ class _Loop(Flow[Any, Any]):
             return bool(seen) and until(seen[-1].value) and not view.exists(out)
 
         agents = [
-            as_agent(
+            as_node(
                 iterate,
                 name=f"{name}:iter",
                 reads=f"{state}:*",
                 trigger=iterate_trigger,
             ),
-            as_agent(
+            as_node(
                 finish, name=f"{name}:done", reads=f"{state}:*", trigger=finish_trigger
             ),
         ]
@@ -349,12 +355,12 @@ class _Branch(Flow[Any, Any]):
         self._select = select
         self._cases = cases
 
-    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Agent], str]:
+    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
         name = ctx.fresh("branch")
         out = name
         ins = {k: f"{name}:in:{k}" for k in self._cases}
         select = self._select
-        agents: list[Agent] = []
+        agents: list[Node] = []
 
         label_tag = ""
         classify: Callable[[Any], str] | None = None
@@ -375,7 +381,7 @@ class _Branch(Flow[Any, Any]):
                 )
             return Result(writes=[Fact(tag=ins[key], value=value)])
 
-        agents.append(as_agent(route, name=f"{name}:route", reads=route_reads))
+        agents.append(as_node(route, name=f"{name}:route", reads=route_reads))
         for k, case in self._cases.items():
             case_agents, case_out = case._build(ctx, ins[k])
             agents.extend(case_agents)
@@ -388,8 +394,9 @@ def branch(
 ) -> Flow[A, B]:
     """Route the input to exactly one case by a label, then merge back to one output. `select`
     is a python callable A -> label, a state key (route by state[key], the declarative form),
-    or a decision flow that produces the label (an extra router step). All cases share input
-    and output types, so the whole branch stays one typed arrow Flow[A, B].
+    or a label-producing flow (an agent with labels=, when the route is the model's choice;
+    an extra router step). All cases share input and output types, so the whole branch stays
+    one typed arrow Flow[A, B].
     """
     if isinstance(select, str):
         key = select
@@ -401,9 +408,9 @@ class _GatherAll(Flow[Any, Any]):
     def __init__(self, flows: tuple[Flow[Any, Any], ...]) -> None:
         self._flows = flows
 
-    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Agent], str]:
+    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
         out = ctx.fresh("gather_all")
-        agents: list[Agent] = []
+        agents: list[Node] = []
         srcs: list[str] = []
         for flow in self._flows:
             fa, fout = flow._build(ctx, entry)
@@ -424,7 +431,7 @@ def gather_all(*flows: Flow[A, B]) -> Flow[A, list[B]]:
 class _Nest(Flow[A, B]):
     def __init__(
         self,
-        target: System | Flow[A, B],
+        target: System | Flow[A, B] | Board,
         *,
         entry: str,
         out: str,
@@ -435,14 +442,15 @@ class _Nest(Flow[A, B]):
         self._out = out
         self._until = until
 
-    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Agent], str]:
+    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
         name = ctx.fresh("nest")
         inner_entry, inner_out = self._entry, self._out
-        system = (
-            self._target.system(entry=inner_entry, out=inner_out, llm=ctx.llm)
-            if isinstance(self._target, Flow)
-            else self._target
-        )
+        if isinstance(self._target, Flow):
+            system = self._target.system(entry=inner_entry, out=inner_out, llm=ctx.llm)
+        elif isinstance(self._target, System):
+            system = self._target
+        else:  # a Board, or anything else that exposes its System
+            system = self._target.system
         until = self._until or Goal(lambda v: v.exists(inner_out))
 
         async def invoke(input: Any, view: View) -> Result:
@@ -458,15 +466,20 @@ class _Nest(Flow[A, B]):
             _inner_guard(run, inner_out, f"nest {name!r}")
             return Result(writes=[Fact(tag=name, value=run.view.value(inner_out))])
 
-        return [as_agent(invoke, name=name, reads=entry)], name
+        return [as_node(invoke, name=name, reads=entry)], name
 
 
 def nest(
-    target: System | Flow[A, B], *, entry: str, out: str, until: Terminate | None = None
+    target: System | Flow[A, B] | Board,
+    *,
+    entry: str,
+    out: str,
+    until: Terminate | None = None,
 ) -> Flow[A, B]:
     """Run a whole sub-system as one typed arrow node: its own inner store, run to a goal,
     one fact out. The boundary is typed and composes; the interior stays opaque. This is
-    how a goal-terminating blackboard surface enters the arrow world, and how a flow nests
-    another flow as an isolated unit. Named nest, not embed, to avoid the embeddings reading.
+    how a goal-terminating Board (the blackboard surface) enters the arrow world, and how a
+    flow nests another flow as an isolated unit. Named nest, not embed, to avoid the
+    embeddings reading.
     """
     return _Nest(target, entry=entry, out=out, until=until)

@@ -2,7 +2,7 @@
 
 import asyncio
 
-from fedotmas.adapters import as_agent
+from fedotmas.adapters import as_node
 from fedotmas.engine.contract import Fact, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
@@ -14,7 +14,7 @@ THRESHOLD = 3
 
 async def generate(input: object, view: View) -> Result:
     n = view.count("draft:*") + 1
-    return Result(payload=n, writes=[Fact(tag=f"draft:{n}", value={"quality": n})])
+    return Result(writes=[Fact(tag=f"draft:{n}", value={"quality": n})])
 
 
 def generate_trigger(view: View) -> bool:
@@ -26,7 +26,6 @@ async def critique(input: object, view: View) -> Result:
     n = view.count("draft:*")
     approved = view.value(f"draft:{n}")["quality"] >= THRESHOLD
     return Result(
-        payload=approved,
         writes=[Fact(tag=f"verdict:{n}", value={"approved": approved})],
     )
 
@@ -41,13 +40,11 @@ def approved(view: View) -> bool:
 
 
 async def main() -> None:
-    generator = as_agent(
+    generator = as_node(
         generate, name="generator", reads="verdict:*", trigger=generate_trigger
     )
-    critic = as_agent(
-        critique, name="critic", reads="draft:*", trigger=critique_trigger
-    )
-    system = System(agents=[generator, critic])
+    critic = as_node(critique, name="critic", reads="draft:*", trigger=critique_trigger)
+    system = System(nodes=[generator, critic])
     store = Store()
     stream = ReactiveExecutor().stream(
         system,

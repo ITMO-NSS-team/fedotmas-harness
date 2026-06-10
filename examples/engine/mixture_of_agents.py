@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from fedotmas.adapters import as_agent
+from fedotmas.adapters import as_node
 from fedotmas.engine.contract import Fact, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
@@ -30,22 +30,22 @@ def synth(layer: str, out: str) -> Callable[[object, View], Awaitable[Result]]:
 
 async def main() -> None:
     system = System(
-        agents=[
+        nodes=[
             *(
-                as_agent(proposer("l1", i), name=f"a{i}", reads="q")
+                as_node(proposer("l1", i), name=f"a{i}", reads="q")
                 for i in range(WIDTH)
             ),
-            as_agent(
+            as_node(
                 synth("l1", "mix1"),
                 name="synth1",
                 reads="l1:*",
                 trigger=lambda v: v.count("l1:*") == WIDTH,
             ),
             *(
-                as_agent(proposer("l2", i), name=f"b{i}", reads="mix1")
+                as_node(proposer("l2", i), name=f"b{i}", reads="mix1")
                 for i in range(WIDTH)
             ),
-            as_agent(
+            as_node(
                 synth("l2", "answer"),
                 name="synth2",
                 reads="l2:*",

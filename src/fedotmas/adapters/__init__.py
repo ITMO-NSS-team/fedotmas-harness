@@ -1,17 +1,17 @@
-"""Extension point: wrap your own framework as an Agent (see engine.contract). Helper as_agent over a callable."""
+"""Extension point: wrap your own framework as a Node (see engine.contract). Helper as_node over a callable."""
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from fedotmas.engine.contract import Agent, Card, Result, View
+from fedotmas.engine.contract import Card, Node, Result, View
 
 Invoke = Callable[[Any, View], Awaitable[Result]]
 Trigger = Callable[[View], bool]
 
 
-class _FnAgent:
+class _FnNode:
     def __init__(
         self, fn: Invoke, name: str, reads: str, trigger: Trigger, meta: dict[str, Any]
     ) -> None:
@@ -31,13 +31,13 @@ class _FnAgent:
         return Card(name=self.name, description=self._fn.__doc__ or "", meta=self._meta)
 
 
-def as_agent(
+def as_node(
     fn: Invoke,
     *,
     name: str,
     reads: str = "",
     trigger: Trigger | None = None,
     meta: dict[str, Any] | None = None,
-) -> Agent:
+) -> Node:
     trig = trigger or (lambda view: view.exists(reads) if reads else False)
-    return _FnAgent(fn, name, reads, trig, meta or {})
+    return _FnNode(fn, name, reads, trig, meta or {})

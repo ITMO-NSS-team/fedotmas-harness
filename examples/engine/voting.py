@@ -8,7 +8,7 @@ import asyncio
 from collections import Counter
 from collections.abc import Awaitable, Callable
 
-from fedotmas.adapters import as_agent
+from fedotmas.adapters import as_node
 from fedotmas.engine.contract import Fact, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
@@ -33,12 +33,12 @@ async def aggregate(input: object, view: View) -> Result:
 
 async def main() -> None:
     system = System(
-        agents=[
+        nodes=[
             *(
-                as_agent(solver(n, a), name=n, reads="question")
+                as_node(solver(n, a), name=n, reads="question")
                 for n, a in BALLOTS.items()
             ),
-            as_agent(
+            as_node(
                 aggregate,
                 name="aggregator",
                 reads="vote:*",
