@@ -24,10 +24,10 @@ real agents and real fact tags only when you call `.system(entry, out)`, which h
 bag of agents the runtime executes. The same flow can be compiled more than once, reused, or
 nested inside a larger flow, because it bakes in no concrete tags until that moment.
 
-So there are two languages in play. The arrow language (`+`, `*`, `gather`, `branch`,
+So there are two languages in play. The arrow language (`+`, `*`, `gather_all`, `branch`,
 `.loop`, `embed`) is what you write. The fact-and-agent language is what it compiles to. Most
 of this page is the arrow language, with the compiled trace shown alongside so you can see the
-seam; the atoms that fill the arrows and the rule surface for shapeless work come after.
+seam; the atoms that fill the arrows and the blackboard surface for shapeless work come after.
 
 ## A first flow
 
@@ -257,13 +257,13 @@ as a runtime mistake, it shows up as a static one.
     `*` binds tighter than `+` in Python, so `a + b * c + d` groups as `a + (b * c) + d`. The
     parallel block clusters on its own without parentheses, which is usually what you mean.
 
-## N-ary parallel: gather
+## N-ary parallel: gather_all
 
 `*` pairs exactly two arrows, nesting tuples if you chain it. When you want a variable number
-of same-typed branches, `gather` is the n-ary form.
+of same-typed branches, `gather_all` is the n-ary form.
 
 ```python
-def gather(*flows: Flow[A, B]) -> Flow[A, list[B]]: ...
+def gather_all(*flows: Flow[A, B]) -> Flow[A, list[B]]: ...
 ```
 
 It fans one input to every branch and collects the outputs into a `list[B]`. A reducer over
@@ -272,7 +272,7 @@ that list is, again, just the next stage.
 ```python
 from collections import Counter
 
-from fedotmas.sdk import action, gather
+from fedotmas.sdk import action, gather_all
 
 
 @action
@@ -288,22 +288,22 @@ async def majority(answers: list[str], view: View) -> str:
     return Counter(answers).most_common(1)[0][0]
 
 
-vote = gather(solver_a, solver_b, solver_c) + majority
+vote = gather_all(solver_a, solver_b, solver_c) + majority
 ```
 
 Output:
 
 ```
 step 0: ['solver_a#2', 'solver_b#3', 'solver_c#4'] -> ['solver_a#2', 'solver_b#3', 'solver_c#4']
-step 1: ['gather#1'] -> ['gather#1']
+step 1: ['gather_all#1'] -> ['gather_all#1']
 step 2: ['majority#5'] -> ['majority#5']
 step 3: ['alias:answer'] -> ['answer']
 answer: 42
 ```
 
-All three solvers run together, `gather#1` collects the list, `majority` reduces it. This is
+All three solvers run together, `gather_all#1` collects the list, `majority` reduces it. This is
 the shape that voting and mixture-of-agents want, and the `list[B]` output makes the reducer
-mandatory by type: a bare `gather` is not yet a usable value, it is a list waiting for a fold.
+mandatory by type: a bare `gather_all` is not yet a usable value, it is a list waiting for a fold.
 
 ## Branch
 
@@ -427,7 +427,7 @@ The difference is entirely in what you put inside the loop, never in the loop it
 
 Not every part of a system is a tidy arrow. Some work is opportunistic: a set of rules that
 fire whenever the store happens to satisfy them, in no fixed order, converging on a goal. That
-is the rule surface, written with `Rule` and `blackboard`, and it does not have a single
+is the blackboard surface, written with `Rule` and `blackboard`, and it does not have a single
 `A -> B` shape to type. `embed` is how such a sub-system enters the arrow world as one node.
 
 ```python
@@ -445,15 +445,9 @@ is opaque.
 from fedotmas.sdk import Flow, Rule, action, blackboard, embed
 
 investigation = blackboard(
-    Rule("hypothesizer",
-         lambda v: v.exists("question") and not v.exists("hypothesis"),
-         hypothesize, writes="hypothesis"),
-    Rule("researcher",
-         lambda v: v.exists("hypothesis") and not v.exists("evidence"),
-         research, writes="evidence"),
-    Rule("verifier",
-         lambda v: v.exists("evidence") and not v.exists("conclusion"),
-         verify, writes="conclusion"),
+    Rule("hypothesizer", hypothesize, writes="hypothesis", reads="question"),
+    Rule("researcher",   research,    writes="evidence",   reads="hypothesis"),
+    Rule("verifier",     verify,      writes="conclusion", reads="evidence"),
 )
 
 solve: Flow[str, str] = embed(investigation, entry="question", out="conclusion")
@@ -496,43 +490,41 @@ The payoff scales past hand-written systems. A typed Python arrow algebra is a s
 search space and a far better target for a program that generates systems than a freeform
 diagram. The same property that catches your mistake prunes a generator's.
 
-## The rule surface
+## The blackboard surface
 
 Not every system is an arrow. When activation is opportunistic, when agents fire in no fixed
 order as the store happens to satisfy them, there is no `A -> B` shape to type. For that the SDK
-has a second surface: rules.
+has a second surface: the blackboard.
 
-A `Rule` pairs an author-written condition with a step. Unlike a flow there is no topology to
-derive a trigger from, so you write `when` yourself; the helper owns the fact bookkeeping.
+A `Rule` pairs a condition with a step. For the common produce-once shape the condition is
+derived from `reads` and `writes` (fire when the read fact is present and the written one is not
+yet), so a pipeline rule needs no trigger. You write `when` only when activation is genuinely
+opportunistic, several rules contending on one fact, or a condition over more than one read.
 
 ```python
 @dataclass
 class Rule:
     name: str
-    when: Callable[[View], bool]
     fn: Callable[[Any, View], Awaitable[Any]]
     writes: str
     reads: str = ""
+    when: Callable[[View], bool] | None = None    # defaults to produce-once
+    meta: dict = field(default_factory=dict)       # rides to the agent, e.g. an auction bid
 
 
 def blackboard(*rules: Rule) -> System: ...
 ```
 
-`blackboard` collects rules into a runnable `System`, the same kind a flow compiles to.
+`blackboard` collects rules into a runnable `System`, the same kind a flow compiles to. A linear
+investigation leans on the default and writes no triggers:
 
 ```python
 from fedotmas.sdk import Rule, blackboard
 
 investigation = blackboard(
-    Rule("hypothesizer",
-         lambda v: v.exists("question") and not v.exists("hypothesis"),
-         hypothesize, writes="hypothesis"),
-    Rule("researcher",
-         lambda v: v.exists("hypothesis") and not v.exists("evidence"),
-         research, writes="evidence"),
-    Rule("verifier",
-         lambda v: v.exists("evidence") and not v.exists("conclusion"),
-         verify, writes="conclusion"),
+    Rule("hypothesizer", hypothesize, writes="hypothesis", reads="question"),
+    Rule("researcher",   research,    writes="evidence",   reads="hypothesis"),
+    Rule("verifier",     verify,      writes="conclusion", reads="evidence"),
 )
 ```
 
@@ -543,11 +535,36 @@ step 2: ['verifier'] -> ['conclusion']
 conclusion: X confirmed
 ```
 
-Each rule woke on its own condition, in an order nobody declared. The order fell out of the
-facts, only with the fact bookkeeping handled for you. Inside a blackboard there are no arrow
-types and so no static check; that is the price of an open shape, and the reason to keep
-blackboards for work that genuinely has no fixed topology. To use a goal-terminating blackboard
-as one node in a flow, wrap it with `embed`.
+That reads like a chain, because it is one. The surface earns its keep when activation is not
+linear. Here `researcher` and `skeptic` both wake on the same hypothesis and run together, and
+`verifier` waits on two independent facts at once, a condition no single read expresses, so it
+spells out `when`:
+
+```python
+blackboard(
+    Rule("hypothesizer", hypothesize, writes="hypothesis", reads="question"),
+    Rule("researcher",   research,    writes="evidence",   reads="hypothesis"),
+    Rule("skeptic",      doubt,       writes="objection",  reads="hypothesis"),
+    Rule("verifier",     verify,      writes="conclusion", reads="evidence",
+         when=lambda v: v.exists("evidence") and v.exists("objection")
+                        and not v.exists("conclusion")),
+)
+```
+
+```
+step 0: ['hypothesizer'] -> ['hypothesis']
+step 1: ['researcher', 'skeptic'] -> ['evidence', 'objection']
+step 2: ['verifier'] -> ['conclusion']
+```
+
+The order fell out of the facts, not a wiring. Inside a blackboard there are no arrow types and
+so no static check; that is the price of an open shape, and the reason to keep blackboards for
+work that genuinely has no fixed topology. To use a goal-terminating blackboard as one node in a
+flow, wrap it with `embed`.
+
+A `Rule` also carries `meta`, a dict that rides to the agent and reads back as
+`agent.describe().meta`. A `Policy` uses it to choose a winner without a side table, which is how
+contract-net puts the bid on the bidder: `AuctionSelect(key=lambda a, v: a.describe().meta["bid"])`.
 
 ## When a flow is the wrong shape
 
@@ -557,12 +574,12 @@ that subset it gives you static checking the raw runtime cannot.
 
 Some systems do not have a fixed topology. The width is decided at runtime, the next speaker is
 chosen by a manager, work is handed off dynamically, a task is auctioned to the best bidder.
-Those are not arrows. They live on the rule surface (authored triggers, optionally a runtime
-policy that picks who fires), where there is no shape to derive and so nothing to type. Forcing
-them into an arrow would be a category error. When such a system does converge on a goal,
+Those are not arrows. They live on the blackboard surface (authored triggers, optionally a
+runtime policy that picks who fires), where there is no shape to derive and so nothing to type.
+Forcing them into an arrow would be a category error. When such a system does converge on a goal,
 `embed` brings its result back across the boundary as a single typed node. Reach for a flow
-where the shape is fixed, reach for rules where order is emergent, and let `embed` be the seam
-between them.
+where the shape is fixed, reach for the blackboard where order is emergent, and let `embed` be
+the seam between them.
 
 ## Reference
 
@@ -575,13 +592,17 @@ between them.
 | `sdk.LLM`                    | the LLM seam, one async `complete(prompt, input, view, returns)` |
 | `Flow.__add__` / `.then`     | sequence, `Flow[A, B] + Flow[B, C] -> Flow[A, C]`             |
 | `Flow.__mul__` / `.par`      | parallel product, `-> Flow[A, tuple[B, C]]`                   |
-| `sdk.gather`                 | n-ary parallel, `*Flow[A, B] -> Flow[A, list[B]]`            |
+| `sdk.gather_all`             | n-ary parallel, `*Flow[A, B] -> Flow[A, list[B]]`            |
 | `sdk.branch`                 | route to one case by a label, `-> Flow[A, B]`                |
 | `Flow.loop`                  | iterate a state-preserving flow, `Flow[A, A] -> Flow[A, A]`   |
 | `sdk.embed`                  | run a whole sub-system as one typed node                     |
 | `Flow.system`                | compile to a runnable `System`, given `entry` and `out` tags |
-| `sdk.Rule`                   | a condition plus a step, the unit of the rule surface         |
+| `sdk.Rule`                   | a step plus `writes`/`reads`, an optional `when` (produce-once by default) and `meta`; the unit of the blackboard surface |
 | `sdk.blackboard`             | collect rules into a runnable `System`                        |
+
+Everything above re-exports from `fedotmas.sdk`. Two surfaces (`flow`, `blackboard`) filled by
+atoms (`action`, `agent`, `decision`). Flat imports are safe, no name shadows a stdlib import;
+`from fedotmas import sdk` with the `sdk.` prefix is available if you want explicit provenance.
 
 Things to keep in mind:
 
@@ -592,8 +613,8 @@ Things to keep in mind:
 - The types are a design-time contract. They are checked before the run and are `Any` at
   runtime, which is why the function signatures should be honest.
 - `+` and `.loop` enforce their stitch crisply. `branch` is looser, keep its cases homogeneous.
-- The join is never a special operator. A `*` product or a `gather` list is consumed by an
+- The join is never a special operator. A `*` product or a `gather_all` list is consumed by an
   ordinary next stage, and the type makes that consumption mandatory.
-- Use a flow where the topology is fixed. Use rules where order is emergent, and `embed` to
-  carry an emergent sub-system back into the arrow world.
+- Use a flow where the topology is fixed. Use the blackboard where order is emergent, and `embed`
+  to carry an emergent sub-system back into the arrow world.
 ```

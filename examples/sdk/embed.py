@@ -27,24 +27,9 @@ async def verify(input: object, view: View) -> str:
 
 
 investigation = blackboard(
-    Rule(
-        "hypothesizer",
-        lambda v: v.exists("question") and not v.exists("hypothesis"),
-        hypothesize,
-        writes="hypothesis",
-    ),
-    Rule(
-        "researcher",
-        lambda v: v.exists("hypothesis") and not v.exists("evidence"),
-        research,
-        writes="evidence",
-    ),
-    Rule(
-        "verifier",
-        lambda v: v.exists("evidence") and not v.exists("conclusion"),
-        verify,
-        writes="conclusion",
-    ),
+    Rule("hypothesizer", hypothesize, writes="hypothesis", reads="question"),
+    Rule("researcher", research, writes="evidence", reads="hypothesis"),
+    Rule("verifier", verify, writes="conclusion", reads="evidence"),
 )
 
 solve: Flow[str, str] = embed(investigation, entry="question", out="conclusion")

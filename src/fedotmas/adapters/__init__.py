@@ -12,11 +12,14 @@ Trigger = Callable[[View], bool]
 
 
 class _FnAgent:
-    def __init__(self, fn: Invoke, name: str, reads: str, trigger: Trigger) -> None:
+    def __init__(
+        self, fn: Invoke, name: str, reads: str, trigger: Trigger, meta: dict[str, Any]
+    ) -> None:
         self.name = name
         self.reads = reads
         self._fn = fn
         self._trigger = trigger
+        self._meta = meta
 
     def trigger(self, view: View) -> bool:
         return self._trigger(view)
@@ -25,11 +28,16 @@ class _FnAgent:
         return await self._fn(input, view)
 
     def describe(self) -> Card:
-        return Card(name=self.name, description=self._fn.__doc__ or "")
+        return Card(name=self.name, description=self._fn.__doc__ or "", meta=self._meta)
 
 
 def as_agent(
-    fn: Invoke, *, name: str, reads: str = "", trigger: Trigger | None = None
+    fn: Invoke,
+    *,
+    name: str,
+    reads: str = "",
+    trigger: Trigger | None = None,
+    meta: dict[str, Any] | None = None,
 ) -> Agent:
     trig = trigger or (lambda view: view.exists(reads) if reads else False)
-    return _FnAgent(fn, name, reads, trig)
+    return _FnAgent(fn, name, reads, trig, meta or {})

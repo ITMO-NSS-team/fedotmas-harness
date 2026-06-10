@@ -1,8 +1,10 @@
 """blackboard: agents self-activate on author-written conditions, no edges.
 
-Same shape as the hand-written engine/blackboard.py. Each Rule carries its own `when`
-predicate, the helper owns the Result/Fact. The arrows cannot express this: there
-is no fixed topology, activation is opportunistic.
+Same shape as the hand-written engine/blackboard.py. These three are a linear chain, so they
+lean on the produce-once default (fire when `reads` is present and `writes` is not yet) and
+need no explicit trigger. The arrows still cannot express the surface in general: activation is
+opportunistic, write `when` once a rule depends on more than one read. See sdk-llm/blackboard.py
+for a genuinely non-linear case.
 """
 
 import asyncio
@@ -28,24 +30,9 @@ async def verify(input: object, view: View) -> str:
 
 async def main() -> None:
     system = blackboard(
-        Rule(
-            "hypothesizer",
-            lambda v: v.exists("question") and not v.exists("hypothesis"),
-            hypothesize,
-            writes="hypothesis",
-        ),
-        Rule(
-            "researcher",
-            lambda v: v.exists("hypothesis") and not v.exists("evidence"),
-            research,
-            writes="evidence",
-        ),
-        Rule(
-            "verifier",
-            lambda v: v.exists("evidence") and not v.exists("conclusion"),
-            verify,
-            writes="conclusion",
-        ),
+        Rule("hypothesizer", hypothesize, writes="hypothesis", reads="question"),
+        Rule("researcher", research, writes="evidence", reads="hypothesis"),
+        Rule("verifier", verify, writes="conclusion", reads="evidence"),
     )
     store = Store()
     stream = ReactiveExecutor().stream(

@@ -41,6 +41,7 @@ class Card(BaseModel):
     description: str = ""
     input_schema: dict[str, Any] = Field(default_factory=dict)
     capabilities: list[str] = Field(default_factory=list)
+    meta: dict[str, Any] = Field(default_factory=dict)
 
 
 class Result(BaseModel):
