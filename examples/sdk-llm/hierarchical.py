@@ -1,6 +1,6 @@
-"""Hierarchical Teams (P12): a whole sub-flow embedded as one node in an outer flow.
+"""Hierarchical Teams (P12): a whole sub-flow nested as one node in an outer flow.
 
-A research team (two searchers fanned by gather_all, then a summarizer) is its own Flow. embed
+A research team (two searchers fanned by gather_all, then a summarizer) is its own Flow. nest
 wraps it as one typed arrow with its own inner store, so from the outer chain it is a single
 opaque step. Nesting is free: the team composes into frame + team + report exactly like an atom.
 
@@ -16,7 +16,7 @@ from fedotmas.engine.contract import Fact
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
 from fedotmas.engine.terminate import Goal
-from fedotmas.sdk import Flow, agent, embed, gather_all
+from fedotmas.sdk import Flow, agent, gather_all, nest
 
 llm = PydanticAI("openai-responses:gpt-4o-mini")
 
@@ -37,7 +37,7 @@ summarize = agent(
 )
 
 research = gather_all(search_a, search_b) + summarize
-team: Flow[str, str] = embed(research, entry="task", out="summary")
+team: Flow[str, str] = nest(research, entry="task", out="summary")
 
 frame = agent(
     "frame", prompt="Turn this brief into a precise research question.", llm=llm

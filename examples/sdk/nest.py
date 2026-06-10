@@ -1,13 +1,13 @@
-"""A blackboard enters the arrow world as one embedded node.
+"""A blackboard enters the arrow world as one nested node.
 
-The rule surface (opportunistic, non-linear, uncheckable interior) is wrapped by embed
+The blackboard surface (opportunistic, non-linear, uncheckable interior) is wrapped by nest
 into a Flow[str, str] with a typed boundary, then composed between two ordinary actions.
 The blackboard runs in its own inner store to its goal; outside it is one opaque arrow.
 """
 
 import asyncio
 
-from fedotmas.sdk import Flow, Rule, action, blackboard, embed
+from fedotmas.sdk import Flow, Rule, action, blackboard, nest
 from fedotmas.engine.contract import Fact, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
@@ -32,7 +32,7 @@ investigation = blackboard(
     Rule("verifier", verify, writes="conclusion", reads="evidence"),
 )
 
-solve: Flow[str, str] = embed(investigation, entry="question", out="conclusion")
+solve: Flow[str, str] = nest(investigation, entry="question", out="conclusion")
 
 
 @action

@@ -29,7 +29,7 @@ on running code.
 ## sdk/
 
 The embedded Python surface (`fedotmas.sdk`). Typed `Flow[A, B]` arrows compose with `+`
-(sequence), `*` / `gather_all` (parallel), `branch`, `.loop`, and `embed`, the type parameters
+(sequence), `*` / `gather_all` (parallel), `branch`, `.loop`, and `nest`, the type parameters
 making each stitch checkable by `ty`. The rule surface (`blackboard`) sits beside them for
 emergent activation. Every file compiles to the same engine `System` and streams its trace.
 
@@ -40,7 +40,7 @@ emergent activation. Every file compiles to the same engine `System` and streams
 | loop (reflection, eval-optimizer) | `sdk/loop.py` | `body.loop(until)` |
 | branch / router | `sdk/branch.py` | `branch(select, cases)` |
 | n-ary parallel + reduce | `sdk/gather_all.py` | `gather_all(a, b, c) + reduce` |
-| blackboard as a node | `sdk/embed.py` | `frame + embed(bb) + report` |
+| blackboard as a node | `sdk/nest.py` | `frame + nest(bb) + report` |
 | rule surface | `sdk/blackboard.py` | `blackboard(*rules)` |
 
 ## sdk-llm/
@@ -48,7 +48,7 @@ emergent activation. Every file compiles to the same engine `System` and streams
 The SDK on real models via the optional `[llm]` extra. The `LLM` contract is the seam: any
 provider or framework wraps into it, and `adapters.pydantic_ai.PydanticAI` is the default
 backend. Every engine pattern is rebuilt here on the high-level surface (`agent`, `decision`,
-`action` lifted into `Flow` and composed with `+ * gather_all branch .loop embed`, plus the
+`action` lifted into `Flow` and composed with `+ * gather_all branch .loop nest`, plus the
 `Rule`/`blackboard` surface), so the same 16 patterns read as a few typed arrows rather than
 hand-wired triggers. Needs an OpenAI key in `.env`; run with the examples group, e.g.
 `uv run --group examples python examples/sdk-llm/prompt_chaining.py`.
@@ -65,7 +65,7 @@ hand-wired triggers. Needs an OpenAI key in `.env`; run with the examples group,
 | Orchestrator-Workers (P9) | `sdk-llm/orchestrator_workers.py` | `plan + work + synthesize`, runtime-sized fan-out |
 | Handoff / Swarm (P10) | `sdk-llm/swarm.py` | `branch(by station)` inside `.loop` |
 | Group Chat (P11) | `sdk-llm/group_chat.py` | `branch(manager decision)` inside `.loop` |
-| Hierarchical Teams (P12) | `sdk-llm/hierarchical.py` | `embed` a research sub-flow as one node |
+| Hierarchical Teams (P12) | `sdk-llm/hierarchical.py` | `nest` a research sub-flow as one node |
 | Blackboard (P13) | `sdk-llm/blackboard.py` | `blackboard(*rules)`, author-written `when` |
 | Contract-Net (P14) | `sdk-llm/contract_net.py` | `blackboard` + `AuctionSelect` policy |
 | Reflection (P15) | `sdk-llm/reflection.py` | `revise.loop(good_enough)`, critic folded in |

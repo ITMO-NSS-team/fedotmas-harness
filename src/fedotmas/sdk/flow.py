@@ -2,7 +2,7 @@
 
 A Flow[A, B] is a fragment from an input of type A to an output of type B. Flows compose into
 whole systems: + is sequence, * is the binary parallel product, gather_all its n-ary form, branch
-routes to one case by a label, .loop iterates a state-preserving flow, embed runs a sub-system
+routes to one case by a label, .loop iterates a state-preserving flow, nest runs a sub-system
 as one opaque node. The type parameters make each stitch checkable: a + b only type-checks when
 b accepts what a produces, so an unjoined parallel (a tuple the next stage must consume) becomes
 a type error, not a runtime footgun.
@@ -65,7 +65,7 @@ def _alias_agent(src: str, out: str, name: str | None = None) -> Agent:
 class Flow(Generic[A, B]):
     """A typed dataflow fragment from input A to output B. Make atoms with action (or agent,
     decision from atoms), then compose: + is sequence, * and gather_all are parallel, branch routes
-    by label, .loop iterates, embed nests a whole sub-system as one node. `.system(entry, out)`
+    by label, .loop iterates, nest wraps a whole sub-system as one node. `.system(entry, out)`
     compiles the fragment to an engine System. The type parameters check each stitch: a + b
     only type-checks when b accepts what a produces.
     """
@@ -250,7 +250,7 @@ def gather_all(*flows: Flow[A, B]) -> Flow[A, list[B]]:
     return _GatherAll(flows)
 
 
-class _Embed(Flow[A, B]):
+class _Nest(Flow[A, B]):
     def __init__(
         self, system: System, *, entry: str, out: str, until: Terminate | None
     ) -> None:
@@ -260,7 +260,7 @@ class _Embed(Flow[A, B]):
         self._until = until
 
     def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Agent], str]:
-        name = ctx.fresh("embed")
+        name = ctx.fresh("nest")
         inner_entry, inner_out = self._entry, self._out
         until = self._until or Goal(lambda v: v.exists(inner_out))
 
@@ -279,13 +279,13 @@ class _Embed(Flow[A, B]):
         return [as_agent(invoke, name=name, reads=entry)], name
 
 
-def embed(
+def nest(
     target: System | Flow[A, B], *, entry: str, out: str, until: Terminate | None = None
 ) -> Flow[A, B]:
     """Run a whole sub-system as one typed arrow node: its own inner store, run to a goal,
     one fact out. The boundary is typed and composes; the interior stays opaque. This is
-    how a goal-terminating blackboard (the rule surface) enters the arrow world, and how a
-    flow nests another flow as an isolated unit.
+    how a goal-terminating blackboard surface enters the arrow world, and how a flow nests
+    another flow as an isolated unit. Named nest, not embed, to avoid the embeddings reading.
     """
     system = target.system(entry=entry, out=out) if isinstance(target, Flow) else target
-    return _Embed(system, entry=entry, out=out, until=until)
+    return _Nest(system, entry=entry, out=out, until=until)

@@ -58,7 +58,7 @@ def _rule_agent(rule: Rule) -> Agent:
 
 def blackboard(*rules: Rule) -> System:
     """Assemble rules into a blackboard System: agents that self-activate when their condition
-    holds, with no fixed topology. Run it directly on the engine, or wrap it with embed to drop
+    holds, with no fixed topology. Run it directly on the engine, or wrap it with nest to drop
     the whole blackboard into a flow as one typed node.
     """
     return System([_rule_agent(r) for r in rules])

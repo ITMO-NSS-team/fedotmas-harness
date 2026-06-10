@@ -24,10 +24,15 @@ real agents and real fact tags only when you call `.system(entry, out)`, which h
 bag of agents the runtime executes. The same flow can be compiled more than once, reused, or
 nested inside a larger flow, because it bakes in no concrete tags until that moment.
 
-So there are two languages in play. The arrow language (`+`, `*`, `gather_all`, `branch`,
-`.loop`, `embed`) is what you write. The fact-and-agent language is what it compiles to. Most
-of this page is the arrow language, with the compiled trace shown alongside so you can see the
-seam; the atoms that fill the arrows and the blackboard surface for shapeless work come after.
+So there are two languages in play. The arrow language is what you write, and it comes in three
+forms that follow the shape of each operation. Two binary combinators are infix operators, `+`
+(sequence) and `*` (parallel), with method aliases `.then` and `.par`. One transform is a method
+on a flow you already have, `.loop`. The rest build a flow from several flows or a whole system,
+so they are plain functions: `gather_all`, `branch`, `nest`. The dividing line is simple: you
+either do more to a flow you have (operator or method) or assemble a new one from parts
+(function). The fact-and-agent language is what it compiles to. Most of this page is the arrow
+language, with the compiled trace shown alongside so you can see the seam; the atoms that fill
+the arrows and the blackboard surface for shapeless work come after.
 
 ## A first flow
 
@@ -423,15 +428,15 @@ optimize = (generate + critique).loop(lambda s: s["approved"])
 Reflection (one body action) and evaluator-optimizer (a two-stage body) are the same arrow.
 The difference is entirely in what you put inside the loop, never in the loop itself.
 
-## Embed
+## Nest
 
 Not every part of a system is a tidy arrow. Some work is opportunistic: a set of rules that
 fire whenever the store happens to satisfy them, in no fixed order, converging on a goal. That
 is the blackboard surface, written with `Rule` and `blackboard`, and it does not have a single
-`A -> B` shape to type. `embed` is how such a sub-system enters the arrow world as one node.
+`A -> B` shape to type. `nest` is how such a sub-system enters the arrow world as one node.
 
 ```python
-def embed(
+def nest(
     target: System | Flow[A, B], *, entry: str, out: str, until: Terminate | None = None
 ) -> Flow[A, B]: ...
 ```
@@ -442,7 +447,7 @@ the incoming value under `entry`, runs the sub-system to its goal (`until`, defa
 is opaque.
 
 ```python
-from fedotmas.sdk import Flow, Rule, action, blackboard, embed
+from fedotmas.sdk import Flow, Rule, action, blackboard, nest
 
 investigation = blackboard(
     Rule("hypothesizer", hypothesize, writes="hypothesis", reads="question"),
@@ -450,7 +455,7 @@ investigation = blackboard(
     Rule("verifier",     verify,      writes="conclusion", reads="evidence"),
 )
 
-solve: Flow[str, str] = embed(investigation, entry="question", out="conclusion")
+solve: Flow[str, str] = nest(investigation, entry="question", out="conclusion")
 
 pipeline = frame + solve + report
 ```
@@ -459,23 +464,23 @@ Output:
 
 ```
 step 0: ['frame#1'] -> ['frame#1']
-step 1: ['embed#2'] -> ['embed#2']
+step 1: ['nest#2'] -> ['nest#2']
 step 2: ['report#3'] -> ['report#3']
 step 3: ['alias:out'] -> ['out']
 out: REPORT: X confirmed
 ```
 
-From the outside, `embed#2` is a single step. The three-rule investigation ran to its
+From the outside, `nest#2` is a single step. The three-rule investigation ran to its
 conclusion inside its own store and surfaced one fact. That is why `solve` drops into a plain
 `frame + solve + report` chain as if it were an atom.
 
-Two things about `embed`. First, it takes a `System` or a `Flow`, so it is also the primitive
+Two things about `nest`. First, it takes a `System` or a `Flow`, so it is also the primitive
 for nesting one flow inside another as a self-contained unit, not only for absorbing a
 blackboard. Second, because the wrapped target is a runtime `System` with no static type, the
 checker cannot infer the boundary types. You annotate them yourself
-(`solve: Flow[str, str] = embed(...)`), and that annotation is load-bearing: it is what the
+(`solve: Flow[str, str] = nest(...)`), and that annotation is load-bearing: it is what the
 checker uses to verify the stitch on either side. Feed a `str` into a flow built around a
-`Flow[tuple[str, str], str]` embed and the mismatch is caught.
+`Flow[tuple[str, str], str]` nest and the mismatch is caught.
 
 ## Why the types
 
@@ -560,7 +565,7 @@ step 2: ['verifier'] -> ['conclusion']
 The order fell out of the facts, not a wiring. Inside a blackboard there are no arrow types and
 so no static check; that is the price of an open shape, and the reason to keep blackboards for
 work that genuinely has no fixed topology. To use a goal-terminating blackboard as one node in a
-flow, wrap it with `embed`.
+flow, wrap it with `nest`.
 
 A `Rule` also carries `meta`, a dict that rides to the agent and reads back as
 `agent.describe().meta`. A `Policy` uses it to choose a winner without a side table, which is how
@@ -577,8 +582,8 @@ chosen by a manager, work is handed off dynamically, a task is auctioned to the 
 Those are not arrows. They live on the blackboard surface (authored triggers, optionally a
 runtime policy that picks who fires), where there is no shape to derive and so nothing to type.
 Forcing them into an arrow would be a category error. When such a system does converge on a goal,
-`embed` brings its result back across the boundary as a single typed node. Reach for a flow
-where the shape is fixed, reach for the blackboard where order is emergent, and let `embed` be
+`nest` brings its result back across the boundary as a single typed node. Reach for a flow
+where the shape is fixed, reach for the blackboard where order is emergent, and let `nest` be
 the seam between them.
 
 ## Reference
@@ -595,7 +600,7 @@ the seam between them.
 | `sdk.gather_all`             | n-ary parallel, `*Flow[A, B] -> Flow[A, list[B]]`            |
 | `sdk.branch`                 | route to one case by a label, `-> Flow[A, B]`                |
 | `Flow.loop`                  | iterate a state-preserving flow, `Flow[A, A] -> Flow[A, A]`   |
-| `sdk.embed`                  | run a whole sub-system as one typed node                     |
+| `sdk.nest`                   | run a whole sub-system as one typed node                     |
 | `Flow.system`                | compile to a runnable `System`, given `entry` and `out` tags |
 | `sdk.Rule`                   | a step plus `writes`/`reads`, an optional `when` (produce-once by default) and `meta`; the unit of the blackboard surface |
 | `sdk.blackboard`             | collect rules into a runnable `System`                        |
@@ -615,6 +620,6 @@ Things to keep in mind:
 - `+` and `.loop` enforce their stitch crisply. `branch` is looser, keep its cases homogeneous.
 - The join is never a special operator. A `*` product or a `gather_all` list is consumed by an
   ordinary next stage, and the type makes that consumption mandatory.
-- Use a flow where the topology is fixed. Use the blackboard where order is emergent, and `embed`
+- Use a flow where the topology is fixed. Use the blackboard where order is emergent, and `nest`
   to carry an emergent sub-system back into the arrow world.
 ```
