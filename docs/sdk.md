@@ -581,8 +581,10 @@ rule's input with store tags as fallback, exactly one of the two. For the common
 shape the condition is derived from `reads` and `writes` (fire when the read fact is present
 and the written one is not yet), so a pipeline rule needs no trigger. You write `when` only
 when activation is genuinely opportunistic, several rules contending on one fact, or a
-condition over more than one read. `rule(...)` is the factory, lowercase like the atom
-factories; `Rule` is the dataclass behind it.
+condition over more than one read. Its declarative form is a list of fact tags that must all
+exist, with a `!` prefix for a fact that must be absent; a callable over the `View` is the
+escape hatch for conditions beyond presence. `rule(...)` is the factory, lowercase like the
+atom factories; `Rule` is the dataclass behind it.
 
 ```python
 @dataclass
@@ -591,7 +593,7 @@ class Rule:
     fn: StepFn | None = None                       # code step...
     writes: str = ""
     reads: str = ""
-    when: Callable[[View], bool] | None = None     # defaults to produce-once
+    when: Callable[[View], bool] | list[str] | None = None   # defaults to produce-once
     meta: dict = field(default_factory=dict)       # rides to the agent, e.g. an auction bid
     prompt: str | None = None                      # ...or a prompt step over the LLM seam
     input: str | None = None                       # template for what the model sees
@@ -644,8 +646,7 @@ blackboard(
     rule("researcher",   research,    writes="evidence",   reads="hypothesis"),
     rule("skeptic",      doubt,       writes="objection",  reads="hypothesis"),
     rule("verifier",     verify,      writes="conclusion", reads="evidence",
-         when=lambda v: v.exists("evidence") and v.exists("objection")
-                        and not v.exists("conclusion")),
+         when=["evidence", "objection", "!conclusion"]),
 )
 ```
 
@@ -697,7 +698,7 @@ the seam between them.
 | `Flow.system`                | compile to a runnable `System`, given `entry`/`out` tags and a default `llm` |
 | `Flow.run` / `Flow.stream`   | compile and execute on one input; returns `FlowRun` / yields `StepReport` |
 | `sdk.FlowRun`                | the outcome: `.value`, `.ok`, `.reason`, `.errors`, `.steps` |
-| `sdk.rule`                   | a self-activating blackboard node, code (`fn`) or prompt (`prompt`/`input`/`returns`), plus `writes`/`reads`, optional `when` and `meta` |
+| `sdk.rule`                   | a self-activating blackboard node, code (`fn`) or prompt (`prompt`/`input`/`returns`), plus `writes`/`reads`, optional `when` (tag list, `!` for absent) and `meta` |
 | `sdk.blackboard`             | assemble rules into a `Board`: `.run(seed, goal=...)`, `.system`, default `llm` for prompt rules |
 
 Everything above re-exports from `fedotmas.sdk`. Two surfaces (`flow`, `blackboard`) filled by

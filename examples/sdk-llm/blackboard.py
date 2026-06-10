@@ -3,8 +3,9 @@
 Every rule here is a prompt, not code: rule(prompt=...) is the rule-surface twin of the agent
 atom, with the backend bound once at blackboard(). researcher and skeptic both wake on the
 same hypothesis and run in parallel; verifier waits on two independent facts at once, a
-condition not reducible to one read, so it spells out `when`, and its `input` template pulls
-both facts from the store by tag. The order falls out of the facts. board.run seeds the
+condition not reducible to one read, so it spells out `when` as a tag list (`!` marks a fact
+that must be absent), and its `input` template pulls both facts from the store by tag. The
+order falls out of the facts. board.run seeds the
 question and reads the conclusion back; the surface arrows cannot express this shape.
 
 Needs an OpenAI key in .env. Run: uv run --group examples python examples/sdk-llm/blackboard.py
@@ -45,11 +46,7 @@ async def main() -> None:
             input="Evidence: {evidence}\nObjection: {objection}",
             reads="evidence",
             writes="conclusion",
-            when=lambda v: (
-                v.exists("evidence")
-                and v.exists("objection")
-                and not v.exists("conclusion")
-            ),
+            when=["evidence", "objection", "!conclusion"],
         ),
         llm=PydanticAI("openai-responses:gpt-4o-mini"),
     )

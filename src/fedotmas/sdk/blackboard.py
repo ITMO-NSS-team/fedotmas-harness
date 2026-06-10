@@ -8,7 +8,9 @@ optional `input` template rendered over the rule's input with store tags as fall
 rule that reads several facts at once stays declarative. For the common produce-once shape
 the condition is derived from reads and writes, so a linear rule needs no trigger; write
 `when` only when the activation is genuinely opportunistic (several rules contending on the
-same fact, conditions not reducible to a single read).
+same fact, conditions not reducible to a single read). The declarative form of `when` is a
+list of fact tags, all of which must exist, with a `!` prefix for must-not-exist; a callable
+over the View is the escape hatch beyond presence tests.
 
 blackboard(...) assembles rules into a Board: run it with board.run(seed, goal=...), hand
 board.system to an engine executor for full control, or wrap it with nest to drop the whole
@@ -17,7 +19,7 @@ board into a flow as one typed node.
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -43,7 +45,9 @@ class Rule:
     means none). The step is `fn` (code) or `prompt` (an LLM call over the seam; `input` is
     the template for what the model sees, `returns` its output type) -- exactly one of the
     two. `when` defaults to produce-once, fire when `reads` exists and `writes` does not yet,
-    so a pipeline rule needs no trigger; supply `when` for opportunistic activation. `meta`
+    so a pipeline rule needs no trigger; supply `when` for opportunistic activation, as a
+    list of tags that must all exist (`"!tag"` for must-not-exist) or, past presence tests,
+    a callable over the View. `meta`
     rides along to the node, e.g. an auction bid that a Policy reads back off
     `node.describe().meta`. An LLM rule binds its backend via `llm` here or the default at
     blackboard(). Construct with the lowercase `rule(...)` for symmetry with the atom
@@ -54,7 +58,7 @@ class Rule:
     fn: StepFn | None = None
     writes: str = ""
     reads: str = ""
-    when: When | None = None
+    when: When | list[str] | None = None
     meta: dict[str, Any] = field(default_factory=dict)
     prompt: str | None = None
     input: str | None = None
@@ -69,6 +73,16 @@ def _produce_once(reads: str, writes: str) -> When:
     if reads:
         return lambda v: v.exists(reads) and not v.exists(writes)
     return lambda v: not v.exists(writes)
+
+
+def _when_tags(name: str, tags: Sequence[Any]) -> When:
+    if not tags or any(t in ("", "!") for t in tags):
+        raise ValueError(f"rule {name!r}: when= tags must be non-empty fact tags")
+    need = [t for t in tags if not t.startswith("!")]
+    veto = [t[1:] for t in tags if t.startswith("!")]
+    return lambda v: (
+        all(v.exists(t) for t in need) and not any(v.exists(t) for t in veto)
+    )
 
 
 def _prompt_fn(r: Rule, llm: LLM) -> StepFn:
@@ -102,7 +116,10 @@ def _rule_node(r: Rule, default_llm: LLM | None) -> Node:
         value = await fn(view.value(r.reads) if r.reads else None, view)
         return Result(writes=[Fact(tag=r.writes, value=value)])
 
-    trigger = r.when or _produce_once(r.reads, r.writes)
+    if isinstance(r.when, list):
+        trigger = _when_tags(r.name, r.when)
+    else:
+        trigger = r.when or _produce_once(r.reads, r.writes)
     return as_node(invoke, name=r.name, reads=r.reads, trigger=trigger, meta=r.meta)
 
 
