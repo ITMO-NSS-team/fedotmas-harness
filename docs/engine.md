@@ -96,7 +96,8 @@ class Fact(BaseModel):
 ```
 
 You set `tag` and `value`. The engine fills in `producer` (which agent wrote it) and `step`
-(which superstep) when the fact is committed, so you leave those alone.
+(which superstep) when the fact is committed, so you leave those alone. Seed facts are
+stamped `step=-1`, so a seed and a step-0 write under the same tag stay distinct facts.
 
 Facts are never edited or deleted. To change something, you write a new fact. Tags are
 usually versioned for this reason: `draft:1`, then `draft:2`, and so on. The identity of a
@@ -208,8 +209,10 @@ condition checks. Routing, handoff, spawning subtasks: all of it is "write a fac
 trigger reads". The `control` field exists for ergonomic sugar over this and is not used by
 the current engine.
 
-`payload`, `status`, `error`, and `usage` are there for reporting and reliability
-middleware. They do not affect the loop.
+`status` and `error` are how an agent reports failure without raising: return
+`Status.ERROR` and the engine treats it exactly like a raised exception (see
+[Errors](#errors)). `payload` and `usage` are for reporting and reliability middleware and
+do not affect the loop.
 
 ## System
 
@@ -263,13 +266,20 @@ class StepReport:
     step: int            # 0-based superstep index
     fired: list[str]     # names of agents that ran this step
     writes: list[Fact]   # facts they produced
+    errors: list[Fact]   # error facts from agents that failed this step
 
 @dataclass
 class Run:
-    status: Status
+    status: Status       # ERROR if any step recorded errors
     steps: list[StepReport]
     view: View           # final snapshot
+    reason: str          # "terminate" | "quiescence" | "error"
 ```
+
+`reason` says how the run ended: the terminate condition fired, the system went quiet on
+its own, or an agent failed. The three are different situations for whoever inspects the
+run, a stalled system in particular (quiescence without the goal fact) usually means a
+wiring gap, not success.
 
 ### What one superstep does
 
@@ -282,12 +292,34 @@ Each iteration of the loop:
    rule, below).
 4. Hand the survivors to the `policy` to pick who actually runs.
 5. `await` all chosen agents at once with `asyncio.gather`.
-6. Stamp their writes with the agent name and step, commit them in one batch, yield a
-   `StepReport`.
-7. Check `terminate`. If done, stop. Otherwise increment the step and repeat.
+6. Stamp their writes with the agent name and step, commit them in one batch together with
+   error facts for any agent that failed, yield a `StepReport`.
+7. If any agent failed, stop. Otherwise check `terminate`. If done, stop. Otherwise
+   increment the step and repeat.
 
 If no agent is ready, the system has gone quiet. The executor yields one final empty
 `StepReport` and stops on its own, even without a terminate condition.
+
+## Errors
+
+A failing agent does not crash the run with a traceback; it becomes data. When `invoke`
+raises (or returns `Status.ERROR`), the engine commits a fact tagged `error:{agent name}`
+whose value is the message, records it in `StepReport.errors`, finishes the step for the
+agents that ran alongside, and stops. The `Run` comes back with `status=ERROR` and
+`reason="error"`.
+
+```python
+run = await ReactiveExecutor().run(system, store, seed=...)
+if run.status is Status.ERROR:
+    for fact in run.steps[-1].errors:
+        print(fact.producer, "failed:", fact.value)
+```
+
+Because the error is a fact in the store, it is queryable like anything else
+(`view.query("error:*")`), and a program inspecting a finished run can see exactly which
+node failed on which step and why. Errors from a nested system (a sub-run inside an agent)
+surface the same way: the wrapping agent raises, and the outer engine records it as that
+node's error fact.
 
 ## Triggers and the fire-once rule
 
@@ -494,6 +526,9 @@ works at every level.
 Things to keep in mind:
 
 - State only changes through `Result.writes`. There is no other side channel.
+- A failing agent ends the run as data: an `error:{name}` fact, `StepReport.errors`,
+  `Run.status=ERROR`, `Run.reason="error"`. Check `Run.reason` to tell a finished run from
+  a stalled or failed one.
 - Facts are append-only and versioned. Never mutate, write a new tag.
 - A superstep is the unit of progress. Agents in one step share a snapshot and cannot see
   each other's writes until the next step.

@@ -92,6 +92,38 @@ could appear twice in one flow without colliding. The last step is an `alias`: t
 its output under `edit#3`, you asked for it under `final`, so one extra agent copies the
 value across. That alias is the only bookkeeping the boundary costs.
 
+## Running a flow
+
+The executor ceremony above is the explicit seam, and you keep it when you need to own the
+store or the terminate condition. Most of the time you do not: a flow knows its own output,
+so `run` derives everything.
+
+```python
+run = await chain.run("haiku", budget=8)
+```
+
+`run(value, *, llm=None, budget=None, policy=None)` compiles the flow, seeds the input,
+executes to "the output exists" (capped by `budget` supersteps if given), and returns a
+`FlowRun`:
+
+```python
+run.value    # the produced output, or None if the run never got there
+run.ok       # finished and produced the output
+run.reason   # "goal" | "error" | "budget" | "stalled"
+run.errors   # error facts from failed nodes, [] when clean
+run.steps    # the full StepReport trace
+run.view     # the final snapshot
+```
+
+`reason` is worth reading on every failure. `"error"` means a node failed and `errors` names
+it with its message. `"budget"` means the step cap fired first, the usual suspect being a
+loop that never satisfied its `until`. `"stalled"` means the system went quiet without
+producing the output, which is almost always a wiring gap. A failing node never surfaces as
+a raw traceback out of `run`; it comes back as data on the `FlowRun`.
+
+`stream(value, ...)` is the same call as an async iterator of `StepReport`, for watching the
+run unfold live. The `llm` argument is the default backend for every LLM node, covered next.
+
 ## Atoms
 
 An atom is a leaf arrow, the smallest `Flow`. Three factories produce one, differing only in
@@ -119,13 +151,16 @@ checkable.
 authored without hand-writing a model call.
 
 ```python
-def agent(name, *, prompt, takes=str, returns=str, llm=None, role="") -> Flow[A, B]: ...
+def agent(
+    name, *, prompt, input=None, takes=str, returns=str,
+    into=None, merge=False, llm=None,
+) -> Flow[A, B]: ...
 ```
 
-`takes` and `returns` declare the arrow's types, defaulting to `str -> str`, so an `agent`
-composes under `ty` exactly like an `action`. The node does not bind a backend itself. At
-runtime it calls an `LLM` (below), passed as `llm`, and that binding is injected, which keeps
-the SDK agnostic about which backend runs.
+`prompt` is the static system prompt. `takes` and `returns` declare the arrow's types,
+defaulting to `str -> str`, so an `agent` composes under `ty` exactly like an `action`. The
+node does not bind a backend itself; `llm` (below) is injected per node or as a compile-time
+default, which keeps the SDK agnostic about which backend runs.
 
 ```python
 summarize = agent("summarize", prompt="Summarize in one word:", llm=some_llm)
@@ -145,6 +180,40 @@ An `agent` is an atom like any other. It took its input from the previous stage 
 value to the next, and nothing in the composition knew or cared that the middle step was a
 model call rather than a function.
 
+### agent over state
+
+A stateless chain passes one value forward, but a loop, a swarm, or a chat threads a *state*
+through every node: each node reads part of it, calls the model, and folds the reply back in.
+Three keyword arguments make that declarative, so the node stays strings and types rather
+than becoming a hand-written model call:
+
+- `input` is a template for what the model sees, rendered over the node's input: dict keys
+  or model fields by name, store tags as a fallback, `{input}` for the whole value. Without
+  it the input is passed through unchanged. A typo in a template fails the node with the
+  missing key named.
+- `into="key"` writes the reply under that key of a dict state and passes the rest through.
+- `merge=True` folds a structured reply's fields into the dict state (`returns` should be a
+  model). `into` and `merge` are mutually exclusive, and both make the node `Flow[dict, dict]`,
+  the state-preserving shape `.loop` wants.
+
+```python
+class Handoff(BaseModel):
+    reply: str
+    station: str            # constrain with Literal[...] to keep handoffs on the rails
+
+triage = agent(
+    "triage",
+    prompt="You are front-line triage. Reply, and set station to who acts next.",
+    input="{ticket}",        # the model sees the ticket, not the whole state dict
+    returns=Handoff,
+    merge=True,              # state | {"reply": ..., "station": ...}
+)
+```
+
+The model saw one field, the reply chose the next station, and the whole node is still data.
+When behavior genuinely needs code (a computation, a dynamic fan-out), `action` is the escape
+hatch; `into`/`merge`/`input` exist so state threading alone never forces you into it.
+
 ### decision
 
 `decision` lifts a prompt into a router. Its output is one label from a fixed set, so its type
@@ -152,11 +221,12 @@ is `Flow[A, str]`, and it is what drives a `branch` when the route is chosen at 
 than by a plain function.
 
 ```python
-def decision(name, *, prompt, labels, takes=str, llm=None, role="") -> Flow[A, str]: ...
+def decision(name, *, prompt, labels, input=None, takes=str, llm=None) -> Flow[A, str]: ...
 ```
 
-The result is validated against `labels` at runtime. A `branch` accepts a `decision` in place
-of a callable selector:
+The label set rides to the backend as a `Literal` in `returns`, so a structured backend
+cannot produce anything outside it, and the reply is validated against `labels` regardless.
+A `branch` accepts a `decision` in place of a callable selector:
 
 ```python
 route = decision("route", prompt="Pick the topic:", labels=["math", "prose"], llm=some_llm)
@@ -194,6 +264,12 @@ method is a backend: an LLM client, a whole framework, a stub, a fake in a test.
 imports a provider. This is the LLM-agnostic point made concrete. An `action` is a model-free
 atom, an `agent` is the same atom shape with an `LLM` behind it, and the two compose without
 distinction.
+
+The binding has two levels. A node can carry its own backend (`llm=` on the factory), and a
+whole composition gets a default at the boundary: `.system(entry, out, llm=...)` or
+`.run(value, llm=...)`. Per-node bindings win, so a flow can run one node on a different
+model and the rest on the default. A node with no backend from either level fails at compile
+time, with its name in the message, never mid-run.
 
 ## Sequence: `+`
 
@@ -315,13 +391,18 @@ mandatory by type: a bare `gather_all` is not yet a usable value, it is a list w
 `branch` routes the input to exactly one of several cases, picked at runtime by a label.
 
 ```python
-def branch(select: Callable[[A], str], cases: dict[str, Flow[A, B]]) -> Flow[A, B]: ...
+def branch(
+    select: Callable[[A], str] | str | Flow[A, str],
+    cases: dict[str, Flow[A, B]],
+) -> Flow[A, B]: ...
 ```
 
-`select` looks at the input and returns a key. Only the case under that key is fed an input
-fact, so only its sub-flow runs, and every case converges to the one branch output. Each case
-is a full `Flow[A, B]`, which means a case can itself be a chain, a parallel block, or another
-branch.
+`select` picks the key: a callable over the input, a state key (`branch("station", ...)`
+routes by `state["station"]`, the declarative form), or a `decision` flow when the choice
+itself needs a model. Only the case under that key is fed an input fact, so only its
+sub-flow runs, and every case converges to the one branch output. A label outside `cases`
+fails the route node with the label and the case set in the message. Each case is a full
+`Flow[A, B]`, which means a case can itself be a chain, a parallel block, or another branch.
 
 ```python
 from fedotmas.sdk import action, branch
@@ -367,8 +448,13 @@ output, which is how three cases can share one output tag without colliding.
 clears.
 
 ```python
-def loop(self: Flow[A, A], until: Callable[[A], bool]) -> Flow[A, A]: ...
+def loop(self: Flow[A, A], until: Callable[[A], bool] | Cond | str) -> Flow[A, A]: ...
 ```
+
+`until` reads the state after each round: a callable, a state key (`.loop(until="done")`
+stops when `state["done"]` is truthy), or a `Cond`, the declarative comparison
+(`Cond(key="rounds_left", op="lte", value=0)`) for conditions a bare key cannot say. The key
+and Cond forms are data, which is what a program emitting a system can write.
 
 The signature has a sharp edge worth reading. The receiver is typed `self: Flow[A, A]`, an
 arrow whose input and output are the same type. You can only call `.loop` on a
@@ -501,7 +587,9 @@ Not every system is an arrow. When activation is opportunistic, when agents fire
 order as the store happens to satisfy them, there is no `A -> B` shape to type. For that the SDK
 has a second surface: the blackboard.
 
-A `Rule` pairs a condition with a step. For the common produce-once shape the condition is
+A `Rule` pairs a condition with a step. The step is code (`fn`) or, like the agent atom, a
+prompt: `prompt` plus an optional `input` template rendered over the rule's input with store
+tags as fallback, exactly one of the two. For the common produce-once shape the condition is
 derived from `reads` and `writes` (fire when the read fact is present and the written one is not
 yet), so a pipeline rule needs no trigger. You write `when` only when activation is genuinely
 opportunistic, several rules contending on one fact, or a condition over more than one read.
@@ -510,28 +598,39 @@ opportunistic, several rules contending on one fact, or a condition over more th
 @dataclass
 class Rule:
     name: str
-    fn: Callable[[Any, View], Awaitable[Any]]
-    writes: str
+    fn: StepFn | None = None                       # code step...
+    writes: str = ""
     reads: str = ""
-    when: Callable[[View], bool] | None = None    # defaults to produce-once
+    when: Callable[[View], bool] | None = None     # defaults to produce-once
     meta: dict = field(default_factory=dict)       # rides to the agent, e.g. an auction bid
+    prompt: str | None = None                      # ...or a prompt step over the LLM seam
+    input: str | None = None                       # template for what the model sees
+    returns: Any = str                             # the prompt step's output type
+    llm: LLM | None = None                         # per-rule backend override
 
 
-def blackboard(*rules: Rule) -> System: ...
+def blackboard(*rules: Rule, llm: LLM | None = None) -> System: ...
 ```
 
-`blackboard` collects rules into a runnable `System`, the same kind a flow compiles to. A linear
-investigation leans on the default and writes no triggers:
+`blackboard` collects rules into a runnable `System`, the same kind a flow compiles to, and
+`llm` is the default backend for prompt rules that did not bind their own (a prompt rule with
+no backend from either level fails here, by name). A linear investigation is prompts all the
+way down and writes no triggers:
 
 ```python
 from fedotmas.sdk import Rule, blackboard
 
 investigation = blackboard(
-    Rule("hypothesizer", hypothesize, writes="hypothesis", reads="question"),
-    Rule("researcher",   research,    writes="evidence",   reads="hypothesis"),
-    Rule("verifier",     verify,      writes="conclusion", reads="evidence"),
+    Rule("hypothesizer", prompt="Propose one testable hypothesis.", reads="question", writes="hypothesis"),
+    Rule("researcher",   prompt="State one supporting piece of evidence.", reads="hypothesis", writes="evidence"),
+    Rule("verifier",     prompt="Weigh and conclude in one line.", reads="evidence", writes="conclusion"),
+    llm=some_llm,
 )
 ```
+
+Because a rule's `input` template falls back to store tags, a rule that weighs several facts
+at once stays declarative: `input="Evidence: {evidence}\nObjection: {objection}"` pulls both
+straight off the blackboard.
 
 ```
 step 0: ['hypothesizer'] -> ['hypothesis']
@@ -592,18 +691,21 @@ the seam between them.
 |------------------------------|--------------------------------------------------------------|
 | `sdk.Flow`                   | the typed arrow `Flow[A, B]`, a lazy dataflow fragment        |
 | `sdk.action`                 | wrap a typed async function as a mechanical atom              |
-| `sdk.agent`                  | lift a prompt into an LLM atom, `Flow[A, B]` over an `LLM`    |
-| `sdk.decision`               | lift a prompt into a router, `Flow[A, str]` over labels       |
+| `sdk.agent`                  | lift a prompt into an LLM atom; `input` template, `into`/`merge` for dict state |
+| `sdk.decision`               | lift a prompt into a router, `Flow[A, str]` over labels (Literal-constrained) |
 | `sdk.LLM`                    | the LLM seam, one async `complete(prompt, input, view, returns)` |
+| `sdk.Cond`                   | a declarative predicate over one state key, for `.loop` (data, not code) |
 | `Flow.__add__` / `.then`     | sequence, `Flow[A, B] + Flow[B, C] -> Flow[A, C]`             |
 | `Flow.__mul__` / `.par`      | parallel product, `-> Flow[A, tuple[B, C]]`                   |
 | `sdk.gather_all`             | n-ary parallel, `*Flow[A, B] -> Flow[A, list[B]]`            |
-| `sdk.branch`                 | route to one case by a label, `-> Flow[A, B]`                |
-| `Flow.loop`                  | iterate a state-preserving flow, `Flow[A, A] -> Flow[A, A]`   |
+| `sdk.branch`                 | route to one case by a label: callable, state key, or decision flow |
+| `Flow.loop`                  | iterate a state-preserving flow until a callable, state key, or `Cond` clears |
 | `sdk.nest`                   | run a whole sub-system as one typed node                     |
-| `Flow.system`                | compile to a runnable `System`, given `entry` and `out` tags |
-| `sdk.Rule`                   | a step plus `writes`/`reads`, an optional `when` (produce-once by default) and `meta`; the unit of the blackboard surface |
-| `sdk.blackboard`             | collect rules into a runnable `System`                        |
+| `Flow.system`                | compile to a runnable `System`, given `entry`/`out` tags and a default `llm` |
+| `Flow.run` / `Flow.stream`   | compile and execute on one input; returns `FlowRun` / yields `StepReport` |
+| `sdk.FlowRun`                | the outcome: `.value`, `.ok`, `.reason`, `.errors`, `.steps` |
+| `sdk.Rule`                   | a blackboard step, code (`fn`) or prompt (`prompt`/`input`/`returns`), plus `writes`/`reads`, optional `when` and `meta` |
+| `sdk.blackboard`             | collect rules into a runnable `System`, default `llm` for prompt rules |
 
 Everything above re-exports from `fedotmas.sdk`. Two surfaces (`flow`, `blackboard`) filled by
 atoms (`action`, `agent`, `decision`). Flat imports are safe, no name shadows a stdlib import;
@@ -611,10 +713,16 @@ atoms (`action`, `agent`, `decision`). Flat imports are safe, no name shadows a 
 
 Things to keep in mind:
 
-- A flow is lazy. It allocates agents and tags only at `.system(entry, out)`, so it is free to
-  reuse and nest.
+- A flow is lazy. It allocates agents and tags only at `.system(entry, out)` (or `.run`), so
+  it is free to reuse and nest. An LLM node with no backend bound, per node or as the
+  compile-time default, fails there, not mid-run.
 - An atom is a function (`action`) or a prompt over an `LLM` (`agent`, `decision`). Both are
   the same `Flow` and compose alike, and the SDK never imports an LLM provider.
+- State threading is declarative: `input` templates pick what the model sees, `into`/`merge`
+  fold the reply back into a dict state, branch routes by a state key, loop stops on one.
+  Reach for `action` only when behavior is genuinely code.
+- Failure is data. `FlowRun.reason` distinguishes goal, error, budget, and stalled; `errors`
+  names the failed node and its message.
 - The types are a design-time contract. They are checked before the run and are `Any` at
   runtime, which is why the function signatures should be honest.
 - `+` and `.loop` enforce their stitch crisply. `branch` is looser, keep its cases homogeneous.

@@ -36,6 +36,7 @@ emergent activation. Every file compiles to the same engine `System` and streams
 | Shape | File | Surface |
 |---|---|---|
 | atom factories | `sdk/factories.py` | `action`, `agent`, `decision` lift leaves into `Flow` |
+| stateful atoms + run | `sdk/state.py` | `input=` templates, `into`/`merge`, `branch("key")`, `.loop("key")`, `Flow.run` |
 | seq, parallel-into-seq | `sdk/composition.py` | `a + b + c`, `(a * b) + c` |
 | loop (reflection, eval-optimizer) | `sdk/loop.py` | `body.loop(until)` |
 | branch / router | `sdk/branch.py` | `branch(select, cases)` |
@@ -47,28 +48,14 @@ emergent activation. Every file compiles to the same engine `System` and streams
 
 The SDK on real models via the optional `[llm]` extra. The `LLM` contract is the seam: any
 provider or framework wraps into it, and `adapters.pydantic_ai.PydanticAI` is the default
-backend. Every engine pattern is rebuilt here on the high-level surface (`agent`, `decision`,
-`action` lifted into `Flow` and composed with `+ * gather_all branch .loop nest`, plus the
-`Rule`/`blackboard` surface), so the same 16 patterns read as a few typed arrows rather than
-hand-wired triggers. Needs an OpenAI key in `.env`; run with the examples group, e.g.
-`uv run --group examples python examples/sdk-llm/prompt_chaining.py`.
+backend, bound once at `.run()` / `blackboard()` rather than on every node. Four examples,
+chosen to be orthogonal: each exercises a different surface of the SDK, and together they
+cover all of it. Needs an OpenAI key in `.env`; run with the examples group, e.g.
+`uv run --group examples python examples/sdk-llm/dag.py`.
 
-| Pattern | File | SDK surface |
+| Shape | File | SDK surface |
 |---|---|---|
-| Prompt Chaining (P1) | `sdk-llm/prompt_chaining.py` | `agent + agent + agent` |
-| Sectioning (P2) | `sdk-llm/sectioning.py` | `gather_all(facets...) + synthesize` |
-| Self-Consistency / Ensemble (P3/P4) | `sdk-llm/voting.py` | `gather_all(decision...) + majority` |
-| DAG (P5) | `sdk-llm/dag.py` | `extract + (support * oppose) + balance` |
-| Evaluator-Optimizer (P6) | `sdk-llm/eval_optimizer.py` | `(generate + critique).loop(approved)`, typed verdict |
-| Mixture-of-Agents (P7) | `sdk-llm/mixture_of_agents.py` | layered `gather_all + synth + gather_all + synth` |
-| Router (P8) | `sdk-llm/router.py` | `branch(decision, cases)` |
-| Orchestrator-Workers (P9) | `sdk-llm/orchestrator_workers.py` | `plan + work + synthesize`, runtime-sized fan-out |
-| Handoff / Swarm (P10) | `sdk-llm/swarm.py` | `branch(by station)` inside `.loop` |
-| Group Chat (P11) | `sdk-llm/group_chat.py` | `branch(manager decision)` inside `.loop` |
-| Hierarchical Teams (P12) | `sdk-llm/hierarchical.py` | `nest` a research sub-flow as one node |
-| Blackboard (P13) | `sdk-llm/blackboard.py` | `blackboard(*rules)`, author-written `when` |
-| Contract-Net (P14) | `sdk-llm/contract_net.py` | `blackboard` + `AuctionSelect` policy |
-| Reflection (P15) | `sdk-llm/reflection.py` | `revise.loop(good_enough)`, critic folded in |
-| Debate (P16) | `sdk-llm/debate.py` | `((pro * con) + judge).loop(rounds)` |
-| mixed pipeline | `sdk-llm/mixed.py` | LLM extract + mechanical compute + LLM phrase, typed structured output |
-| SDK injection | `sdk-llm/injection.py` | pydantic-ai and langchain over one `LLM` seam, injected by name |
+| DAG with a parallel block | `sdk-llm/dag.py` | stateless arrows: `extract + (support * oppose) + balance`, `Flow.run` and `FlowRun` |
+| Blackboard | `sdk-llm/blackboard.py` | declarative prompt rules (`Rule(prompt=...)`), opportunistic `when`, `input` template over store tags, raw engine run |
+| Master orchestrator | `sdk-llm/orchestrator.py` | structured plan sized at runtime, `action` as the code escape hatch for dynamic fan-out |
+| Handoff / Swarm | `sdk-llm/swarm.py` | stateful atoms end to end: `input=` templates, `merge=` structured handoff, `branch("station")` inside `.loop(until="done")` |

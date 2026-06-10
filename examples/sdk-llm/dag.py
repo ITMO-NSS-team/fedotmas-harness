@@ -1,8 +1,9 @@
-"""DAG (P5): a diamond. extract -> (support * oppose) -> balance.
+"""DAG with a parallel block: extract, argue both sides at once, then weigh.
 
-One claim fans into two opposed researchers that run together, then a join weighs both. The
-parallel product types as tuple[str, str], so balance must consume the pair: forget the join
-and the + is a type error, not a lost branch at runtime.
+The arrow algebra on stateless str -> str nodes: + is sequence, * is the parallel product
+whose tuple the next stage consumes. No node names a backend; the llm binds once as the
+default at .run(), which also derives the store, the seed, and the terminate condition, and
+hands back a FlowRun: .value, .ok, .reason, and the full .steps trace.
 
 Needs an OpenAI key in .env. Run: uv run --group examples python examples/sdk-llm/dag.py
 """
@@ -12,53 +13,35 @@ import asyncio
 from dotenv import load_dotenv
 
 from fedotmas.adapters.pydantic_ai import PydanticAI
-from fedotmas.engine.contract import Fact
-from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.store import Store
-from fedotmas.engine.terminate import Goal
 from fedotmas.sdk import agent
 
-llm = PydanticAI("openai-responses:gpt-4o-mini")
-
 extract = agent(
-    "extract",
-    prompt="State the single central claim of this text in one sentence.",
-    llm=llm,
+    "extract", prompt="Extract the central claim of the text in one sentence."
 )
-support = agent(
-    "support",
-    prompt="Give the strongest one-sentence argument FOR this claim.",
-    llm=llm,
-)
-oppose = agent(
-    "oppose",
-    prompt="Give the strongest one-sentence argument AGAINST this claim.",
-    llm=llm,
-)
+support = agent("support", prompt="Give the single strongest argument FOR the claim.")
+oppose = agent("oppose", prompt="Give the single strongest argument AGAINST the claim.")
 balance = agent(
     "balance",
-    prompt="Given a (for, against) pair, write one balanced verdict sentence.",
+    prompt="You get a (for, against) pair of arguments. Weigh them and give a one-sentence verdict.",
     takes=tuple,
     returns=str,
-    llm=llm,
 )
 
-TEXT = "Remote work makes teams more productive than any office ever could."
+dag = extract + (support * oppose) + balance
+
+TEXT = (
+    "Multi-agent systems should be compiled from a declarative spec rather than "
+    "hand-wired, because a spec can be generated, checked, and repaired by a machine."
+)
 
 
 async def main() -> None:
     load_dotenv()
-    diamond = extract + (support * oppose) + balance
-    store = Store()
-    stream = ReactiveExecutor().stream(
-        diamond.system(entry="text", out="verdict"),
-        store,
-        seed=[Fact(tag="text", value=TEXT)],
-        terminate=Goal(lambda v: v.exists("verdict")),
-    )
-    async for r in stream:
+    run = await dag.run(TEXT, llm=PydanticAI("openai-responses:gpt-4o-mini"), budget=8)
+    for r in run.steps:
         print(f"step {r.step}: {r.fired} -> {[f.tag for f in r.writes]}")
-    print("verdict:", store.snapshot().value("verdict"))
+    print("reason:", run.reason)
+    print("verdict:", run.value)
 
 
 if __name__ == "__main__":

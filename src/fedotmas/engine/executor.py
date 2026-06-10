@@ -44,6 +44,11 @@ def _stamp(facts: Iterable[Fact], producer: str, step: int) -> list[Fact]:
     return out
 
 
+def _error_fact(name: str, message: str, step: int, kind: str = "") -> Fact:
+    meta = {"type": kind} if kind else {}
+    return Fact(tag=f"error:{name}", value=message, producer=name, step=step, meta=meta)
+
+
 class ReactiveExecutor:
     async def stream(
         self,
@@ -55,7 +60,7 @@ class ReactiveExecutor:
         policy: Policy | None = None,
     ) -> AsyncIterator[StepReport]:
         active = policy or FireAll()
-        store.commit(_stamp(seed, "seed", 0))
+        store.commit(_stamp(seed, "seed", -1))
         fired: set[tuple[str, frozenset[tuple[str, int]]]] = set()
         step = 0
         while True:
@@ -76,15 +81,30 @@ class ReactiveExecutor:
                 yield StepReport(step, [], [])
                 return
             results = await asyncio.gather(
-                *(agent.invoke(matched[agent.name][0], view) for agent in ready)
+                *(agent.invoke(matched[agent.name][0], view) for agent in ready),
+                return_exceptions=True,
             )
             writes: list[Fact] = []
+            errors: list[Fact] = []
             for agent, result in zip(ready, results):
-                writes.extend(_stamp(result.writes, agent.name, step))
                 fired.add(matched[agent.name][1])
-            store.commit(writes)
-            report = StepReport(step, [agent.name for agent in ready], writes)
+                if isinstance(result, BaseException):
+                    if not isinstance(result, Exception):
+                        raise result
+                    errors.append(
+                        _error_fact(
+                            agent.name, str(result), step, type(result).__name__
+                        )
+                    )
+                    continue
+                if result.status is Status.ERROR:
+                    errors.append(_error_fact(agent.name, result.error or "", step))
+                writes.extend(_stamp(result.writes, agent.name, step))
+            store.commit([*writes, *errors])
+            report = StepReport(step, [agent.name for agent in ready], writes, errors)
             yield report
+            if errors:
+                return
             if terminate is not None and terminate.done(store.snapshot(), report):
                 return
             step += 1
@@ -104,4 +124,9 @@ class ReactiveExecutor:
                 system, store, seed=seed, terminate=terminate, policy=policy
             )
         ]
-        return Run(Status.OK, steps, store.snapshot())
+        status, reason = Status.OK, "terminate"
+        if steps and steps[-1].errors:
+            status, reason = Status.ERROR, "error"
+        elif steps and not steps[-1].fired:
+            reason = "quiescence"
+        return Run(status, steps, store.snapshot(), reason)

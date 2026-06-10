@@ -12,11 +12,13 @@ explicit provenance.
 
 from fedotmas.sdk.atoms import LLM, action, agent, decision
 from fedotmas.sdk.blackboard import Rule, blackboard
-from fedotmas.sdk.flow import Flow, branch, gather_all, nest
+from fedotmas.sdk.flow import Cond, Flow, FlowRun, branch, gather_all, nest
 
 __all__ = [
     "LLM",
+    "Cond",
     "Flow",
+    "FlowRun",
     "Rule",
     "action",
     "agent",

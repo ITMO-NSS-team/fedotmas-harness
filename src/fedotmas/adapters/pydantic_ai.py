@@ -22,10 +22,10 @@ class PydanticAI:
     def __init__(self, model: str, **settings: Any) -> None:
         self._model = model
         self._settings = settings
-        self._agents: dict[tuple[str, type], Agent] = {}
+        self._agents: dict[tuple[str, Any], Agent] = {}
 
     async def complete(
-        self, prompt: str, input: Any, view: View, returns: type = str
+        self, prompt: str, input: Any, view: View, returns: Any = str
     ) -> Any:
         agent = self._agents.get((prompt, returns))
         if agent is None:

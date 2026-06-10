@@ -42,8 +42,9 @@ async def main() -> None:
                 reduce,
                 name="reducer",
                 reads="res:*",
-                trigger=lambda v: v.exists("sub:*")
-                and v.count("res:*") == v.count("sub:*"),
+                trigger=lambda v: (
+                    v.exists("sub:*") and v.count("res:*") == v.count("sub:*")
+                ),
             ),
         ]
     )

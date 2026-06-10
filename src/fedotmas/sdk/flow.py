@@ -10,29 +10,88 @@ a type error, not a runtime footgun.
 This module is the algebra only. The leaves that fill it, action (model-free) and agent /
 decision (over the LLM seam), live in atoms; the rule surface in blackboard. Composition is
 lazy: a Flow allocates fact tags and agents only at .system(), so the same fragment can be
-reused and nested.
+reused and nested. An LLM backend bound at .system() / .run() becomes the default for every
+LLM node that did not bind its own; an unbound node fails there, at compile time, not mid-run.
+
+Where the algebra takes a predicate or a selector, it also takes a declarative form that a
+program can emit as data: .loop(until=) accepts a state key or a Cond next to a callable, and
+branch(select=) accepts a state key next to a callable or a decision flow.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
-from typing import Any, Generic, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
+
+from pydantic import BaseModel
 
 from fedotmas.adapters import as_agent
-from fedotmas.engine.contract import Agent, Fact, Result, View
+from fedotmas.engine.contract import Agent, Fact, Result, Status, View
 from fedotmas.engine.executor import ReactiveExecutor
+from fedotmas.engine.scheduler import Run, StepReport
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
-from fedotmas.engine.terminate import Goal, Terminate
+from fedotmas.engine.terminate import Budget, Goal, Terminate
+
+if TYPE_CHECKING:
+    from fedotmas.engine.policy import Policy
+    from fedotmas.sdk.atoms import LLM
 
 A = TypeVar("A")
 B = TypeVar("B")
 C = TypeVar("C")
 
 
+def _pick(state: Any, key: str) -> Any:
+    if isinstance(state, dict):
+        return state.get(key)
+    return getattr(state, key, None)
+
+
+class Cond(BaseModel):
+    """A declarative predicate over one key of the state: data, not code, so a program that
+    emits systems can express a stop or routing condition without writing a callable. `key`
+    is looked up in the state (dict key or attribute, absent reads as None), `op` compares it
+    to `value`. The default op is truthy, so Cond(key="approved") means state["approved"].
+    """
+
+    key: str
+    op: Literal["truthy", "not", "eq", "ne", "gte", "lte", "exists"] = "truthy"
+    value: Any = None
+
+    def check(self, state: Any) -> bool:
+        if self.op == "exists":
+            return (
+                self.key in state
+                if isinstance(state, dict)
+                else hasattr(state, self.key)
+            )
+        v = _pick(state, self.key)
+        if self.op == "truthy":
+            return bool(v)
+        if self.op == "not":
+            return not v
+        if self.op == "eq":
+            return v == self.value
+        if self.op == "ne":
+            return v != self.value
+        if self.op == "gte":
+            return v >= self.value
+        return v <= self.value
+
+
+def _as_predicate(until: Callable[[Any], bool] | Cond | str) -> Callable[[Any], bool]:
+    if isinstance(until, str):
+        until = Cond(key=until)
+    if isinstance(until, Cond):
+        return until.check
+    return until
+
+
 @dataclass
 class _Ctx:
+    llm: LLM | None = None
     n: int = 0
 
     def fresh(self, hint: str) -> str:
@@ -62,23 +121,124 @@ def _alias_agent(src: str, out: str, name: str | None = None) -> Agent:
     return as_agent(invoke, name=name or f"alias:{out}", reads=src)
 
 
+def _inner_guard(run: Run, out: str, what: str) -> None:
+    """Surface an inner run's failure as this node's failure, so the outer engine records it
+    as an error fact instead of silently writing None."""
+    if run.status is Status.ERROR:
+        msgs = "; ".join(
+            f"{e.producer}: {e.value}" for s in run.steps for e in s.errors
+        )
+        raise RuntimeError(f"{what}: inner system failed ({msgs})")
+    if not run.view.exists(out):
+        raise RuntimeError(f"{what}: inner system stalled before producing {out!r}")
+
+
+@dataclass
+class FlowRun:
+    """The outcome of Flow.run: the engine Run plus the flow's out tag, read back as one
+    object. `value` is the produced output (None if the run never reached it), `ok` is
+    "finished and produced the output", and `reason` says how the run ended: "goal" (output
+    produced), "error" (a node failed, see `errors`), "budget" (step cap hit first), or
+    "stalled" (the system went quiet without producing the output: a wiring gap).
+    """
+
+    run: Run
+    out: str
+
+    @property
+    def view(self) -> View:
+        return self.run.view
+
+    @property
+    def steps(self) -> list[StepReport]:
+        return self.run.steps
+
+    @property
+    def value(self) -> Any:
+        return self.run.view.value(self.out)
+
+    @property
+    def errors(self) -> list[Fact]:
+        return [e for s in self.run.steps for e in s.errors]
+
+    @property
+    def ok(self) -> bool:
+        return self.run.status is Status.OK and self.run.view.exists(self.out)
+
+    @property
+    def reason(self) -> str:
+        if self.run.reason == "error":
+            return "error"
+        if self.run.view.exists(self.out):
+            return "goal"
+        return "stalled" if self.run.reason == "quiescence" else "budget"
+
+
 class Flow(Generic[A, B]):
     """A typed dataflow fragment from input A to output B. Make atoms with action (or agent,
     decision from atoms), then compose: + is sequence, * and gather_all are parallel, branch routes
     by label, .loop iterates, nest wraps a whole sub-system as one node. `.system(entry, out)`
-    compiles the fragment to an engine System. The type parameters check each stitch: a + b
-    only type-checks when b accepts what a produces.
+    compiles the fragment to an engine System; `.run(value)` compiles and executes it in one
+    call. The type parameters check each stitch: a + b only type-checks when b accepts what a
+    produces.
     """
 
     def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Agent], str]:
         raise NotImplementedError
 
-    def system(self, *, entry: str, out: str) -> System:
-        ctx = _Ctx()
+    def system(self, *, entry: str, out: str, llm: LLM | None = None) -> System:
+        """Compile to a runnable System. `llm` becomes the default backend for every LLM node
+        that did not bind its own; a node with no backend at all fails here, not mid-run."""
+        ctx = _Ctx(llm=llm)
         agents, last = self._build(ctx, entry)
         if last != out:
             agents = [*agents, _alias_agent(last, out)]
         return System(agents)
+
+    async def run(
+        self,
+        value: A,
+        *,
+        llm: LLM | None = None,
+        budget: int | None = None,
+        policy: Policy | None = None,
+    ) -> FlowRun:
+        """Compile and execute the flow on one input. The store, the seed fact, and the
+        terminate condition (output produced, optionally capped by `budget` supersteps) are
+        derived, so the caller holds no tags. Returns a FlowRun: `.value`, `.ok`, `.reason`,
+        `.errors`, and the full `.steps` trace.
+        """
+        system = self.system(entry="in", out="out", llm=llm)
+        terminate: Terminate = Goal(lambda v: v.exists("out"))
+        if budget is not None:
+            terminate = terminate | Budget(budget)
+        store = Store()
+        run = await ReactiveExecutor().run(
+            system,
+            store,
+            seed=[Fact(tag="in", value=value)],
+            terminate=terminate,
+            policy=policy,
+        )
+        return FlowRun(run, "out")
+
+    async def stream(
+        self,
+        value: A,
+        *,
+        llm: LLM | None = None,
+        budget: int | None = None,
+        policy: Policy | None = None,
+    ) -> AsyncIterator[StepReport]:
+        """The streaming form of .run: yields each StepReport as the run unfolds."""
+        system = self.system(entry="in", out="out", llm=llm)
+        terminate: Terminate = Goal(lambda v: v.exists("out"))
+        if budget is not None:
+            terminate = terminate | Budget(budget)
+        async for report in ReactiveExecutor().stream(
+            system, Store(), seed=[Fact(tag="in", value=value)], terminate=terminate
+        ):
+            yield report
 
     def __add__(self, other: Flow[B, C]) -> Flow[A, C]:
         return _Seq(self, other)
@@ -92,8 +252,11 @@ class Flow(Generic[A, B]):
     def par(self, other: Flow[A, C]) -> Flow[A, tuple[B, C]]:
         return _Par(self, other)
 
-    def loop(self: Flow[A, A], until: Callable[[A], bool]) -> Flow[A, A]:
-        return _Loop(self, until)
+    def loop(self: Flow[A, A], until: Callable[[A], bool] | Cond | str) -> Flow[A, A]:
+        """Iterate the flow, feeding each round's output in as the next round's input, until
+        `until` clears. `until` is a callable over the state, a Cond, or a state key (stop
+        when state[key] is truthy)."""
+        return _Loop(self, _as_predicate(until))
 
 
 class _Seq(Flow[Any, Any]):
@@ -129,7 +292,7 @@ class _Loop(Flow[Any, Any]):
         out = name
         state = f"{name}:s"
         body_in, body_out = f"{name}:in", f"{name}:out"
-        body = self._body.system(entry=body_in, out=body_out)
+        body = self._body.system(entry=body_in, out=body_out, llm=ctx.llm)
         until = self._until
 
         async def iterate(input: Any, view: View) -> Result:
@@ -142,6 +305,7 @@ class _Loop(Flow[Any, Any]):
                 seed=[Fact(tag=body_in, value=src)],
                 terminate=Goal(lambda v: v.exists(body_out)),
             )
+            _inner_guard(run, body_out, f"loop {name!r} round {len(seen) + 1}")
             n = len(seen) + 1
             return Result(
                 writes=[Fact(tag=f"{state}:{n}", value=run.view.value(body_out))]
@@ -205,6 +369,10 @@ class _Branch(Flow[Any, Any]):
         async def route(input: Any, view: View) -> Result:
             value = view.value(entry) if entry else None
             key = classify(value) if classify is not None else view.value(label_tag)
+            if key not in ins:
+                raise ValueError(
+                    f"branch {name!r} got label {key!r}, not one of {sorted(ins)}"
+                )
             return Result(writes=[Fact(tag=ins[key], value=value)])
 
         agents.append(as_agent(route, name=f"{name}:route", reads=route_reads))
@@ -216,13 +384,16 @@ class _Branch(Flow[Any, Any]):
 
 
 def branch(
-    select: Flow[A, str] | Callable[[A], str], cases: dict[str, Flow[A, B]]
+    select: Flow[A, str] | Callable[[A], str] | str, cases: dict[str, Flow[A, B]]
 ) -> Flow[A, B]:
     """Route the input to exactly one case by a label, then merge back to one output. `select`
-    is either a python callable A -> label (resolved in a single step) or a decision flow that
-    produces the label (an extra router step). All cases share input and output types, so the
-    whole branch stays one typed arrow Flow[A, B].
+    is a python callable A -> label, a state key (route by state[key], the declarative form),
+    or a decision flow that produces the label (an extra router step). All cases share input
+    and output types, so the whole branch stays one typed arrow Flow[A, B].
     """
+    if isinstance(select, str):
+        key = select
+        select = lambda state: _pick(state, key)  # noqa: E731
     return _Branch(select, cases)
 
 
@@ -252,9 +423,14 @@ def gather_all(*flows: Flow[A, B]) -> Flow[A, list[B]]:
 
 class _Nest(Flow[A, B]):
     def __init__(
-        self, system: System, *, entry: str, out: str, until: Terminate | None
+        self,
+        target: System | Flow[A, B],
+        *,
+        entry: str,
+        out: str,
+        until: Terminate | None,
     ) -> None:
-        self._system = system
+        self._target = target
         self._entry = entry
         self._out = out
         self._until = until
@@ -262,18 +438,24 @@ class _Nest(Flow[A, B]):
     def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Agent], str]:
         name = ctx.fresh("nest")
         inner_entry, inner_out = self._entry, self._out
+        system = (
+            self._target.system(entry=inner_entry, out=inner_out, llm=ctx.llm)
+            if isinstance(self._target, Flow)
+            else self._target
+        )
         until = self._until or Goal(lambda v: v.exists(inner_out))
 
         async def invoke(input: Any, view: View) -> Result:
             inner = Store()
             run = await ReactiveExecutor().run(
-                self._system,
+                system,
                 inner,
                 seed=[
                     Fact(tag=inner_entry, value=view.value(entry) if entry else None)
                 ],
                 terminate=until,
             )
+            _inner_guard(run, inner_out, f"nest {name!r}")
             return Result(writes=[Fact(tag=name, value=run.view.value(inner_out))])
 
         return [as_agent(invoke, name=name, reads=entry)], name
@@ -287,5 +469,4 @@ def nest(
     how a goal-terminating blackboard surface enters the arrow world, and how a flow nests
     another flow as an isolated unit. Named nest, not embed, to avoid the embeddings reading.
     """
-    system = target.system(entry=entry, out=out) if isinstance(target, Flow) else target
-    return _Nest(system, entry=entry, out=out, until=until)
+    return _Nest(target, entry=entry, out=out, until=until)
