@@ -55,12 +55,14 @@ class _Action(Flow[A, B]):
         return [_action_node(out, self._fn, entry, out)], out
 
 
-def action(fn: ActionFn[A, B]) -> Flow[A, B]:
+def action(fn: ActionFn[A, B], *, name: str | None = None) -> Flow[A, B]:
     """Lift a plain async function (input, view) -> output into a Flow atom. The body is code
     and the types come from the signature; no model is involved. This is the model-free atom,
     the same arrow shape an agent has but mechanical, so the two compose without distinction.
+    `name` overrides the function's __name__ in traces and error tags; pass it when lifting a
+    lambda, which otherwise shows up as <lambda>.
     """
-    return _Action(getattr(fn, "__name__", "action"), fn)
+    return _Action(name or getattr(fn, "__name__", "action"), fn)
 
 
 class LLM(Protocol):

@@ -59,8 +59,8 @@ class View(Protocol):
 @runtime_checkable
 class Node(Protocol):
     """The unit the executor runs. `reads` is one or more whitespace-separated fact patterns
-    and carries double duty: the facts matched by it are the node's input, and their keys are
-    the node's re-fire identity. The executor is edge-triggered: a node fires at most once per
+    and carries double duty: the facts matched by it are the node's input (invoke receives
+    them as a list[Fact]), and their keys are the node's re-fire identity. The executor is edge-triggered: a node fires at most once per
     distinct set of matched facts, however long `trigger` stays true. A node with empty reads
     therefore fires at most once per run; a node meant to re-fire on new facts must name them
     in `reads`.

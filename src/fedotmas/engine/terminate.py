@@ -32,6 +32,8 @@ class _Term:
 
 class Budget(_Term):
     def __init__(self, max_steps: int) -> None:
+        if max_steps < 1:
+            raise ValueError(f"Budget needs max_steps >= 1, got {max_steps}")
         self.max_steps = max_steps
 
     def done(self, view: View, report: StepReport) -> bool:

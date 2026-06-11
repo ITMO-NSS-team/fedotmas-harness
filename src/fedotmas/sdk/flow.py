@@ -17,6 +17,12 @@ Where the algebra takes a predicate or a selector, it also takes a declarative f
 program can emit as data: .loop(until=) accepts a state key or a Condition next to a callable,
 and branch(select=) accepts a state key next to a callable or a label-producing flow (an
 agent with labels=).
+
+One event-wave caveat: a join (* or gather_all) reads the latest version of each source, and
+re-fires as soon as any source gains one. In a single-shot run that is exactly "fire once when
+all arrive", but under mid-run commits with branches of unequal length a join can emit a mixed
+pair (one branch's new value, the other's stale one) before the slower branch lands. Waves are
+not yet aligned per join; that needs an epoch notion the engine does not have.
 """
 
 from __future__ import annotations
@@ -33,7 +39,7 @@ from fedotmas.engine.node import as_node
 from fedotmas.engine.report import Run, StepReport
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
-from fedotmas.engine.terminate import Budget, Goal, Terminate
+from fedotmas.engine.terminate import Budget, Goal, Terminate, any_of
 
 if TYPE_CHECKING:
     from fedotmas.engine.policy import Policy
@@ -65,11 +71,16 @@ class Condition(BaseModel):
     value: Any = None
 
     @model_validator(mode="after")
-    def _ordered_needs_value(self) -> Condition:
+    def _value_matches_op(self) -> Condition:
         if self.op in ("gt", "lt", "gte", "lte") and self.value is None:
             raise ValueError(
                 f"Condition(key={self.key!r}, op={self.op!r}): an ordered comparison "
                 "needs value="
+            )
+        if self.op in ("truthy", "not", "exists") and self.value is not None:
+            raise ValueError(
+                f"Condition(key={self.key!r}, op={self.op!r}): {self.op} does not "
+                "compare, drop value="
             )
         return self
 
@@ -154,7 +165,9 @@ def _inner_guard(run: Run, out: str, what: str) -> None:
         )
         raise RuntimeError(f"{what}: inner system failed ({msgs})")
     if not run.view.exists(out):
-        raise RuntimeError(f"{what}: inner system stalled before producing {out!r}")
+        raise RuntimeError(
+            f"{what}: inner system stopped ({run.reason}) before producing {out!r}"
+        )
 
 
 @dataclass
@@ -198,6 +211,12 @@ class Outcome:
         if self.run.view.exists(self.out):
             return "goal"
         return "stalled" if self.run.reason == "quiescence" else "budget"
+
+    def __repr__(self) -> str:
+        value = repr(self.value)
+        if len(value) > 120:
+            value = value[:117] + "..."
+        return f"Outcome(ok={self.ok}, reason={self.reason!r}, value={value})"
 
 
 class Flow(Generic[A, B]):
@@ -287,12 +306,17 @@ class Flow(Generic[A, B]):
         return _Par(self, other)
 
     def loop(
-        self: Flow[A, A], until: Callable[[A], bool] | Condition | str
+        self: Flow[A, A],
+        until: Callable[[A], bool] | Condition | str,
+        *,
+        budget: int | None = 100,
     ) -> Flow[A, A]:
         """Iterate the flow, feeding each round's output in as the next round's input, until
         `until` clears. `until` is a callable over the state, a Condition, or a state key (stop
-        when state[key] is truthy)."""
-        return _Loop(self, _as_predicate(until))
+        when state[key] is truthy). Each round runs the body in its own inner store as one
+        outer superstep, so rounds are capped by the outer budget but a round itself is not;
+        `budget` caps the supersteps inside one round (default 100, None lifts it)."""
+        return _Loop(self, _as_predicate(until), budget)
 
 
 class _Seq(Flow[Any, Any]):
@@ -319,9 +343,12 @@ class _Par(Flow[Any, Any]):
 
 
 class _Loop(Flow[Any, Any]):
-    def __init__(self, body: Flow[Any, Any], until: Callable[[Any], bool]) -> None:
+    def __init__(
+        self, body: Flow[Any, Any], until: Callable[[Any], bool], budget: int | None
+    ) -> None:
         self._body = body
         self._until = until
+        self._budget = budget
 
     def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
         name = ctx.fresh("loop")
@@ -330,6 +357,9 @@ class _Loop(Flow[Any, Any]):
         body_in, body_out = f"{name}:in", f"{name}:out"
         body = self._body.system(entry=body_in, out=body_out, llm=ctx.llm)
         until = self._until
+        round_term: Terminate = Goal(lambda v: v.exists(body_out))
+        if self._budget is not None:
+            round_term = any_of(round_term, Budget(self._budget))
 
         async def iterate(input: Any, view: View) -> Result:
             seen = view.query(f"{state}:*")
@@ -339,7 +369,7 @@ class _Loop(Flow[Any, Any]):
                 body,
                 inner,
                 seed=[Fact(tag=body_in, value=src)],
-                terminate=Goal(lambda v: v.exists(body_out)),
+                terminate=round_term,
             )
             _inner_guard(run, body_out, f"loop {name!r} round {len(seen) + 1}")
             n = len(seen) + 1
@@ -468,11 +498,13 @@ class _Nest(Flow[A, B]):
         entry: str,
         out: str,
         until: Terminate | None,
+        budget: int | None,
     ) -> None:
         self._target = target
         self._entry = entry
         self._out = out
         self._until = until
+        self._budget = budget
 
     def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
         name = ctx.fresh("nest")
@@ -484,6 +516,8 @@ class _Nest(Flow[A, B]):
         else:  # a Board: compile with the flow's default llm as the fallback backend
             system = self._target.compile(ctx.llm)
         until = self._until or Goal(lambda v: v.exists(inner_out))
+        if self._budget is not None:
+            until = any_of(until, Budget(self._budget))
 
         async def invoke(input: Any, view: View) -> Result:
             inner = Store()
@@ -507,12 +541,18 @@ def nest(
     entry: str,
     out: str,
     until: Terminate | None = None,
+    budget: int | None = 100,
 ) -> Flow[A, B]:
     """Run a whole sub-system as one typed arrow node: its own inner store, run to a goal,
     one fact out. The boundary is typed and composes; the interior stays opaque. This is
     how a goal-terminating Board (the blackboard surface) enters the arrow world, and how a
     flow nests another flow as an isolated unit. A Flow or Board target picks up the outer
     flow's default llm as its fallback backend; a System is already compiled, so the default
-    does not reach inside it. Named nest, not embed, to avoid the embeddings reading.
+    does not reach inside it. The inner run is the outer node's single superstep, so the
+    outer budget cannot interrupt it; `budget` caps the inner supersteps instead (the default
+    100 is a runaway guard, None lifts it). The inner run always halts on its first error and
+    the failure surfaces as this node's error fact; the outer halt_on_error then decides
+    whether the rest of the system continues. Named nest, not embed, to avoid the embeddings
+    reading.
     """
-    return _Nest(target, entry=entry, out=out, until=until)
+    return _Nest(target, entry=entry, out=out, until=until, budget=budget)

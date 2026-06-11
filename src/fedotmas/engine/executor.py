@@ -73,7 +73,12 @@ class ReactiveExecutor:
         policy: Policy | None = None,
     ) -> AsyncIterator[StepReport]:
         active = policy or FireAll()
-        store.commit(_stamp(seed, "seed", -1))
+        store.commit(
+            [
+                f if f.producer else f.model_copy(update={"producer": "seed"})
+                for f in seed
+            ]
+        )
         fired: set[tuple[str, frozenset[tuple[str, int]]]] = set()
         step = 0
         while True:
