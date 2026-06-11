@@ -102,8 +102,10 @@ stamped `step=-1`, so a seed and a step-0 write under the same tag stay distinct
 
 Facts are never edited or deleted. To change something, you write a new fact. Tags are
 usually versioned for this reason: `draft:1`, then `draft:2`, and so on. The identity of a
-fact is `(tag, step)`, exposed as `fact.key`, and the engine uses that key to track what an
-agent has already consumed (see [Triggers](#triggers-and-the-fire-once-rule)).
+fact is `(tag, step, producer)`, exposed as `fact.key`, and the engine uses that key to
+track what an agent has already consumed (see
+[Triggers](#triggers-and-the-fire-once-rule)). Producer is part of the identity so two
+agents writing the same tag in the same superstep count as two distinct facts, not one.
 
 ## Store and View
 
@@ -113,7 +115,7 @@ the current superstep.
 
 ```python
 class View(Protocol):
-    def get(self, tag: str) -> Fact | None: ...   # latest fact for an exact tag
+    def get(self, tag: str) -> Fact | None: ...   # latest matching fact
     def value(self, tag: str) -> Any: ...          # latest value, or None
     def query(self, pattern: str) -> list[Fact]: ...
     def exists(self, pattern: str) -> bool: ...
@@ -130,9 +132,9 @@ view.count("vote:*")       # 5
 view.exists("verdict:*")   # True
 ```
 
-`get` and `value` return the *latest* matching fact, so `view.value("draft:3")` gives you
-the value written under that tag. `query` returns matches in the order they were committed,
-which is why `view.query("draft:*")[-1]` is a common way to reach the newest draft.
+`get` and `value` return the *latest* matching fact and accept the same patterns, so
+`view.value("draft:3")` gives the value written under that tag and `view.value("draft:*")`
+the newest draft. `query` returns matches in the order they were committed.
 
 !!! note "Why a snapshot, not the live store"
     Every agent in a superstep reads the same frozen view. If two agents run together,
@@ -179,7 +181,8 @@ def as_node(fn, *, name, reads="", trigger=None) -> Node: ...
 ```
 
 `fn` has the signature `async (input, view) -> Result`. If you do not pass a `trigger`, the
-default is "fire when every `reads` pattern has a match":
+default is "fire when every `reads` pattern has a match"; with empty `reads` it is "never",
+so a node without reads needs an explicit trigger to fire at all:
 
 ```python
 # these are the same agent
@@ -271,7 +274,7 @@ class Run:
     status: Status       # ERROR if any step recorded errors
     steps: list[StepReport]
     view: View           # final snapshot
-    reason: str          # "terminate" | "quiescence" | "error"
+    reason: Literal["terminate", "quiescence", "error"]
 ```
 
 `reason` says how the run ended: the terminate condition fired, the system went quiet on

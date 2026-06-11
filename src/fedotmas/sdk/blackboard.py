@@ -81,11 +81,23 @@ def _check(r: Rule) -> None:
         raise ValueError(f"rule {r.name!r}: exactly one of fn= or prompt= is required")
     if not r.writes:
         raise ValueError(f"rule {r.name!r}: writes= is required")
+    if len(r.reads.split()) > 1:
+        raise ValueError(
+            f"rule {r.name!r}: reads= names one fact tag; condition on several "
+            "facts with when= and read them off the view"
+        )
     when = r.when
     if when is None or callable(when):
         return
     if isinstance(when, str) or not when or any(t in ("", "!") for t in when):
         raise ValueError(f"rule {r.name!r}: when= takes a sequence of non-empty tags")
+    clash = {t for t in when if not t.startswith("!")} & {
+        t[1:] for t in when if t.startswith("!")
+    }
+    if clash:
+        raise ValueError(
+            f"rule {r.name!r}: when= both requires and forbids {sorted(clash)}"
+        )
 
 
 def _as_when(r: Rule) -> tuple[When, list[str]]:
@@ -182,9 +194,10 @@ class Board:
         budget: int | None = 100,
         policy: Policy | None = None,
         llm: LLM | None = None,
+        halt_on_error: bool = True,
     ) -> Outcome:
         system, facts, terminate = self._prepare(seed, goal, budget, llm)
-        run = await ReactiveExecutor().run(
+        run = await ReactiveExecutor(halt_on_error=halt_on_error).run(
             system, Store(), seed=facts, terminate=terminate, policy=policy
         )
         return Outcome(run, goal)
@@ -197,10 +210,11 @@ class Board:
         budget: int | None = 100,
         policy: Policy | None = None,
         llm: LLM | None = None,
+        halt_on_error: bool = True,
     ) -> AsyncIterator[StepReport]:
         """The streaming form of .run: yields each StepReport as the run unfolds."""
         system, facts, terminate = self._prepare(seed, goal, budget, llm)
-        async for report in ReactiveExecutor().stream(
+        async for report in ReactiveExecutor(halt_on_error=halt_on_error).stream(
             system, Store(), seed=facts, terminate=terminate, policy=policy
         ):
             yield report

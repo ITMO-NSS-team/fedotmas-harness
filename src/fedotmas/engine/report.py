@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from fedotmas.engine.contract import Fact, Status, View
 
@@ -20,4 +21,4 @@ class Run:
     status: Status
     steps: list[StepReport]
     view: View
-    reason: str = "terminate"  # "terminate" | "quiescence" | "error"
+    reason: Literal["terminate", "quiescence", "error"] = "terminate"

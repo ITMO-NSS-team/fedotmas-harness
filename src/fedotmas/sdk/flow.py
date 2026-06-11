@@ -25,7 +25,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from fedotmas.engine.contract import Fact, Node, Result, Status, View
 from fedotmas.engine.executor import ReactiveExecutor
@@ -63,6 +63,15 @@ class Condition(BaseModel):
         "truthy"
     )
     value: Any = None
+
+    @model_validator(mode="after")
+    def _ordered_needs_value(self) -> Condition:
+        if self.op in ("gt", "lt", "gte", "lte") and self.value is None:
+            raise ValueError(
+                f"Condition(key={self.key!r}, op={self.op!r}): an ordered comparison "
+                "needs value="
+            )
+        return self
 
     def check(self, state: Any) -> bool:
         if self.op == "exists":
@@ -114,22 +123,22 @@ class _Ctx:
         return f"{hint}#{self.n}"
 
 
-def _gather_agent(name: str, srcs: list[str], out: str) -> Node:
+def _gather_node(name: str, srcs: list[str], out: str) -> Node:
     async def invoke(input: Any, view: View) -> Result:
         value = tuple(view.value(s) for s in srcs)
         return Result(writes=[Fact(tag=out, value=value)])
 
-    return as_node(invoke, name=name, trigger=lambda v: all(v.exists(s) for s in srcs))
+    return as_node(invoke, name=name, reads=" ".join(srcs))
 
 
-def _collect_agent(name: str, srcs: list[str], out: str) -> Node:
+def _collect_node(name: str, srcs: list[str], out: str) -> Node:
     async def invoke(input: Any, view: View) -> Result:
         return Result(writes=[Fact(tag=out, value=[view.value(s) for s in srcs])])
 
-    return as_node(invoke, name=name, trigger=lambda v: all(v.exists(s) for s in srcs))
+    return as_node(invoke, name=name, reads=" ".join(srcs))
 
 
-def _alias_agent(src: str, out: str, name: str | None = None) -> Node:
+def _alias_node(src: str, out: str, name: str | None = None) -> Node:
     async def invoke(input: Any, view: View) -> Result:
         return Result(writes=[Fact(tag=out, value=view.value(src))])
 
@@ -152,9 +161,11 @@ def _inner_guard(run: Run, out: str, what: str) -> None:
 class Outcome:
     """The outcome of a run surface (Flow.run, Board.run): the engine Run plus the out tag,
     read back as one object. `value` is the produced output (None if the run never reached
-    it), `ok` is "finished and produced the output", and `reason` says how the run ended:
-    "goal" (output produced), "error" (a node failed, see `errors`), "budget" (step cap hit
-    first), or "stalled" (the system went quiet without producing the output: a wiring gap).
+    it), `ok` is "finished clean and produced the output", and `reason` says how the run
+    ended: "goal" (output produced), "error" (a node failed, see `errors`), "budget" (step
+    cap hit first), or "stalled" (the system went quiet without producing the output: a
+    wiring gap). Under halt_on_error=False a run can end reason "goal" with `errors`
+    non-empty; `ok` stays False, it never overlooks an error.
     """
 
     run: Run
@@ -181,7 +192,7 @@ class Outcome:
         return self.run.status is Status.OK and self.run.view.exists(self.out)
 
     @property
-    def reason(self) -> str:
+    def reason(self) -> Literal["goal", "error", "budget", "stalled"]:
         if self.run.reason == "error":
             return "error"
         if self.run.view.exists(self.out):
@@ -205,10 +216,10 @@ class Flow(Generic[A, B]):
         """Compile to a runnable System. `llm` becomes the default backend for every LLM node
         that did not bind its own; a node with no backend at all fails here, not mid-run."""
         ctx = _Ctx(llm=llm)
-        agents, last = self._build(ctx, entry)
+        nodes, last = self._build(ctx, entry)
         if last != out:
-            agents = [*agents, _alias_agent(last, out)]
-        return System(agents)
+            nodes = [*nodes, _alias_node(last, out)]
+        return System(nodes)
 
     def _prepare(self, llm: LLM | None, budget: int | None) -> tuple[System, Terminate]:
         system = self.system(entry="in", out="out", llm=llm)
@@ -224,15 +235,17 @@ class Flow(Generic[A, B]):
         llm: LLM | None = None,
         budget: int | None = 100,
         policy: Policy | None = None,
+        halt_on_error: bool = True,
     ) -> Outcome:
         """Compile and execute the flow on one input. The store, the seed fact, and the
         terminate condition (output produced, capped by `budget` supersteps; the default 100
         is a runaway guard, None lifts the cap) are derived, so the caller holds no tags.
-        Returns an Outcome: `.value`, `.ok`, `.reason`, `.errors`, and the full `.steps`
-        trace.
+        `halt_on_error=False` keeps the run going past a failed node; the error still lands
+        in `.errors` and `.ok` stays False. Returns an Outcome: `.value`, `.ok`, `.reason`,
+        `.errors`, and the full `.steps` trace.
         """
         system, terminate = self._prepare(llm, budget)
-        run = await ReactiveExecutor().run(
+        run = await ReactiveExecutor(halt_on_error=halt_on_error).run(
             system,
             Store(),
             seed=[Fact(tag="in", value=value)],
@@ -248,10 +261,11 @@ class Flow(Generic[A, B]):
         llm: LLM | None = None,
         budget: int | None = 100,
         policy: Policy | None = None,
+        halt_on_error: bool = True,
     ) -> AsyncIterator[StepReport]:
         """The streaming form of .run: yields each StepReport as the run unfolds."""
         system, terminate = self._prepare(llm, budget)
-        async for report in ReactiveExecutor().stream(
+        async for report in ReactiveExecutor(halt_on_error=halt_on_error).stream(
             system,
             Store(),
             seed=[Fact(tag="in", value=value)],
@@ -301,7 +315,7 @@ class _Par(Flow[Any, Any]):
         la, lout = self._left._build(ctx, entry)
         ra, rout = self._right._build(ctx, entry)
         out = ctx.fresh("par")
-        return [*la, *ra, _gather_agent(out, [lout, rout], out)], out
+        return [*la, *ra, _gather_node(out, [lout, rout], out)], out
 
 
 class _Loop(Flow[Any, Any]):
@@ -348,7 +362,7 @@ class _Loop(Flow[Any, Any]):
             seen = view.query(f"{state}:*")
             return bool(seen) and until(seen[-1].value) and not view.exists(out)
 
-        agents = [
+        nodes = [
             as_node(
                 iterate,
                 name=f"{name}:iter",
@@ -359,7 +373,7 @@ class _Loop(Flow[Any, Any]):
                 finish, name=f"{name}:done", reads=f"{state}:*", trigger=finish_trigger
             ),
         ]
-        return agents, out
+        return nodes, out
 
 
 class _Branch(Flow[Any, Any]):
@@ -376,13 +390,13 @@ class _Branch(Flow[Any, Any]):
         out = name
         ins = {k: f"{name}:in:{k}" for k in self._cases}
         select = self._select
-        agents: list[Node] = []
+        nodes: list[Node] = []
 
         label_tag = ""
         classify: Callable[[Any], str] | None = None
         if isinstance(select, Flow):
-            sel_agents, label_tag = select._build(ctx, entry)
-            agents.extend(sel_agents)
+            sel_nodes, label_tag = select._build(ctx, entry)
+            nodes.extend(sel_nodes)
             route_reads = label_tag
         else:
             classify = select
@@ -397,12 +411,12 @@ class _Branch(Flow[Any, Any]):
                 )
             return Result(writes=[Fact(tag=ins[key], value=value)])
 
-        agents.append(as_node(route, name=f"{name}:route", reads=route_reads))
+        nodes.append(as_node(route, name=f"{name}:route", reads=route_reads))
         for k, case in self._cases.items():
-            case_agents, case_out = case._build(ctx, ins[k])
-            agents.extend(case_agents)
-            agents.append(_alias_agent(case_out, out, name=f"{name}:join:{k}"))
-        return agents, out
+            case_nodes, case_out = case._build(ctx, ins[k])
+            nodes.extend(case_nodes)
+            nodes.append(_alias_node(case_out, out, name=f"{name}:join:{k}"))
+        return nodes, out
 
 
 def branch(
@@ -426,13 +440,13 @@ class _GatherAll(Flow[Any, Any]):
 
     def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
         out = ctx.fresh("gather_all")
-        agents: list[Node] = []
+        nodes: list[Node] = []
         srcs: list[str] = []
         for flow in self._flows:
-            fa, fout = flow._build(ctx, entry)
-            agents.extend(fa)
+            built, fout = flow._build(ctx, entry)
+            nodes.extend(built)
             srcs.append(fout)
-        return [*agents, _collect_agent(out, srcs, out)], out
+        return [*nodes, _collect_node(out, srcs, out)], out
 
 
 def gather_all(*flows: Flow[A, B]) -> Flow[A, list[B]]:
@@ -497,7 +511,8 @@ def nest(
     """Run a whole sub-system as one typed arrow node: its own inner store, run to a goal,
     one fact out. The boundary is typed and composes; the interior stays opaque. This is
     how a goal-terminating Board (the blackboard surface) enters the arrow world, and how a
-    flow nests another flow as an isolated unit. Named nest, not embed, to avoid the
-    embeddings reading.
+    flow nests another flow as an isolated unit. A Flow or Board target picks up the outer
+    flow's default llm as its fallback backend; a System is already compiled, so the default
+    does not reach inside it. Named nest, not embed, to avoid the embeddings reading.
     """
     return _Nest(target, entry=entry, out=out, until=until)

@@ -1,4 +1,4 @@
-"""Store: the shared blackboard. Snapshot, commit, query, subscribe."""
+"""Store: the shared blackboard. Commit facts, snapshot an immutable view, query it."""
 
 from __future__ import annotations
 

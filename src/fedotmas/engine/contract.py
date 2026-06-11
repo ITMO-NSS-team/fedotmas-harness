@@ -26,8 +26,10 @@ class Fact(BaseModel):
     meta: dict[str, Any] = Field(default_factory=dict)
 
     @property
-    def key(self) -> tuple[str, int]:
-        return (self.tag, self.step)
+    def key(self) -> tuple[str, int, str]:
+        """Version identity. Producer is part of it: two nodes writing the same tag in the
+        same superstep produce two distinct versions, not one."""
+        return (self.tag, self.step, self.producer)
 
 
 class Card(BaseModel):
@@ -44,6 +46,9 @@ class Result(BaseModel):
 
 @runtime_checkable
 class View(Protocol):
+    """Read access to the store. `query/exists/count` take a pattern, an exact tag or a `*`
+    prefix glob; `get/value` take a pattern too and return the latest match."""
+
     def get(self, tag: str) -> Fact | None: ...
     def value(self, tag: str) -> Any: ...
     def query(self, pattern: str) -> list[Fact]: ...

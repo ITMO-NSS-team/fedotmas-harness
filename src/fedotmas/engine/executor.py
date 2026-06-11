@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import traceback
 from collections.abc import AsyncIterator, Iterable
-from typing import Protocol
+from typing import Literal, Protocol
 
 from fedotmas.engine.contract import Fact, Status, View
 from fedotmas.engine.policy import FireAll, Policy
@@ -136,9 +136,10 @@ class ReactiveExecutor:
             )
         ]
         status = Status.ERROR if any(s.errors for s in steps) else Status.OK
-        if self._halt and steps and steps[-1].errors:
-            reason = "error"
-        elif steps and not steps[-1].fired:
+        last = steps[-1]
+        if self._halt and last.errors:
+            reason: Literal["terminate", "quiescence", "error"] = "error"
+        elif not last.fired:
             reason = "quiescence"
         else:
             reason = "terminate"

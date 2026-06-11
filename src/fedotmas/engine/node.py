@@ -42,7 +42,8 @@ def as_node(
     """Wrap an async (input, view) -> Result function as a Node. `reads` holds one or more
     whitespace-separated fact patterns: it is the input the executor matches for the node and
     the node's re-fire identity (see Node). The default trigger is "every reads pattern has a
-    match"; pass `trigger` to activate on any other condition.
+    match"; with empty reads it is "never", so a node without reads needs an explicit
+    `trigger` to fire at all (and then fires at most once per run).
     """
     if trigger is not None:
         trig = trigger

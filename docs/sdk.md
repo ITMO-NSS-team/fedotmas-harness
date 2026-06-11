@@ -86,10 +86,10 @@ value across. That alias is the only bookkeeping the boundary costs.
 
 ## Running a flow
 
-`run(value, *, llm=None, budget=100, policy=None)` compiles the flow, seeds the input,
-executes to "the output exists" (capped by `budget` supersteps; the default 100 is a runaway
-guard for loops that never satisfy their `until`, pass `budget=None` to lift it), and returns
-an `Outcome`:
+`run(value, *, llm=None, budget=100, policy=None, halt_on_error=True)` compiles the flow,
+seeds the input, executes to "the output exists" (capped by `budget` supersteps; the default
+100 is a runaway guard for loops that never satisfy their `until`, pass `budget=None` to
+lift it), and returns an `Outcome`:
 
 ```python
 run.value    # the produced output, or None if the run never got there
@@ -105,7 +105,10 @@ it with its message. `"budget"` means the step cap fired first, the usual suspec
 loop that never satisfied its `until`. `"stalled"` means the system went quiet without
 producing the output, which is almost always a wiring gap. A failing node never surfaces as
 a raw traceback out of `run`; it comes back as data on the `Outcome` (the full traceback
-rides in the error fact's `meta["traceback"]` when you need it).
+rides in the error fact's `meta["traceback"]` when you need it). By default the run stops at
+the first failed node; `halt_on_error=False` lets the rest of the system keep going, so the
+run can still reach `reason="goal"` with `errors` non-empty, and `ok` stays False either
+way.
 
 `stream(value, ...)` is the same call as an async iterator of `StepReport`, for watching the
 run unfold live. The `llm` argument is the default backend for every LLM node, covered next.
@@ -442,8 +445,10 @@ def loop(self: Flow[A, A], until: Callable[[A], bool] | Condition | str) -> Flow
 
 `until` reads the state after each round: a callable, a state key (`.loop(until="done")`
 stops when `state["done"]` is truthy), or a `Condition`, the declarative comparison
-(`Condition(key="rounds_left", op="lte", value=0)`) for conditions a bare key cannot say. The
-key and Condition forms are data, which is what a program emitting a system can write.
+(`Condition(key="rounds_left", op="lte", value=0)`) for conditions a bare key cannot say; the
+ordered ops (`gt`/`lt`/`gte`/`lte`) require a `value=` and a present key, and complain by
+name otherwise. The key and Condition forms are data, which is what a program emitting a
+system can write.
 
 The signature has a sharp edge worth reading. The receiver is typed `self: Flow[A, A]`, an
 arrow whose input and output are the same type. You can only call `.loop` on a
@@ -552,7 +557,9 @@ conclusion inside its own store and surfaced one fact. That is why `solve` drops
 
 Two things about `nest`. First, it takes a `Board`, a raw `System`, or a `Flow`, so it is also
 the primitive for nesting one flow inside another as a self-contained unit, not only for
-absorbing a blackboard. Second, because the wrapped target has no static arrow type, the
+absorbing a blackboard; a `Flow` or `Board` target picks up the outer flow's default `llm` as
+its fallback backend, while a `System` is already compiled and keeps its own bindings.
+Second, because the wrapped target has no static arrow type, the
 checker cannot infer the boundary types. You annotate them yourself
 (`solve: Flow[str, str] = nest(...)`), and that annotation is load-bearing: it is what the
 checker uses to verify the stitch on either side. Feed a `str` into a flow built around a
@@ -585,7 +592,9 @@ and the written one is not yet), so a pipeline rule needs no trigger. You write 
 when activation is genuinely opportunistic, several rules contending on one fact, or a
 condition over more than one read. Its declarative form is a list of fact tags that must all
 exist, with a `!` prefix for a fact that must be absent; a callable over the `View` is the
-escape hatch for conditions beyond presence.
+escape hatch for conditions beyond presence. `reads` names the one fact fed to the step as
+its input; a rule over several facts conditions on them with `when` and reads them off the
+view (or pulls them into an `input` template by tag).
 
 ```python
 @dataclass
@@ -611,7 +620,8 @@ name). A board runs symmetrically with a flow: `board.run(seed, goal=...)` takes
 facts as a tag -> value dict and the tag to read the result back from, and returns the same
 `Outcome`; `board.stream` is the same run yielded step by step. An `llm` passed at
 `board.run(...)` is the last-resort backend, behind the board default and the per-rule
-binding. `board.system` is the raw engine `System` when you want executor-level control. A
+binding, and `halt_on_error=False` works the same as on `Flow.run`. `board.system` is the
+raw engine `System` when you want executor-level control. A
 linear investigation is prompts all the way down and writes no triggers:
 
 ```python
