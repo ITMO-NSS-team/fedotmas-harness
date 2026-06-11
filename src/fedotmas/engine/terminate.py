@@ -37,7 +37,7 @@ class Budget(_Term):
         self.max_steps = max_steps
 
     def done(self, view: View, report: StepReport) -> bool:
-        return report.step + 1 >= self.max_steps
+        return report.index + 1 >= self.max_steps
 
 
 class Goal(_Term):

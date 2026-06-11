@@ -18,6 +18,9 @@ class Status(str, Enum):
     ERROR = "error"
 
 
+Key = tuple[str, int, str]
+
+
 class Fact(BaseModel):
     tag: str
     value: Any = None
@@ -26,9 +29,9 @@ class Fact(BaseModel):
     meta: dict[str, Any] = Field(default_factory=dict)
 
     @property
-    def key(self) -> tuple[str, int, str]:
-        """Version identity. Producer is part of it: two nodes writing the same tag in the
-        same superstep produce two distinct versions, not one."""
+    def key(self) -> Key:
+        """Version identity, (tag, step, producer). Producer is part of it: two nodes writing
+        the same tag in the same superstep produce two distinct versions, not one."""
         return (self.tag, self.step, self.producer)
 
 

@@ -1,4 +1,10 @@
-"""Store: the shared blackboard. Commit facts, snapshot an immutable view, query it."""
+"""Store: the shared blackboard. Commit facts, snapshot an immutable view, query it.
+
+The store owns the logical clock: `next_step` is one past the highest step ever committed,
+so the step axis is monotonic across runs and mid-run feeders, and re-running an executor
+over the same store cannot collide fact keys. Seeds at step -1 sit before time and do not
+advance it.
+"""
 
 from __future__ import annotations
 
@@ -39,9 +45,16 @@ class Snapshot:
 class Store:
     def __init__(self) -> None:
         self._facts: list[Fact] = []
+        self._clock = 0
 
     def commit(self, facts: Iterable[Fact]) -> None:
-        self._facts.extend(facts)
+        for f in facts:
+            self._facts.append(f)
+            if f.step >= self._clock:
+                self._clock = f.step + 1
+
+    def next_step(self) -> int:
+        return self._clock
 
     def snapshot(self) -> View:
         return Snapshot(tuple(self._facts))

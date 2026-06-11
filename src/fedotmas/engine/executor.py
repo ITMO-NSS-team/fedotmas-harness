@@ -5,9 +5,9 @@ from __future__ import annotations
 import asyncio
 import traceback
 from collections.abc import AsyncIterator, Iterable
-from typing import Literal, Protocol
+from typing import Literal, NamedTuple, Protocol
 
-from fedotmas.engine.contract import Fact, Status, View
+from fedotmas.engine.contract import Fact, Key, Node, Status, View
 from fedotmas.engine.policy import FireAll, Policy
 from fedotmas.engine.report import Run, StepReport
 from fedotmas.engine.store import Store
@@ -41,8 +41,47 @@ def _stamp(facts: Iterable[Fact], producer: str, step: int) -> list[Fact]:
     return [f.model_copy(update={"producer": producer, "step": step}) for f in facts]
 
 
+def _seed(facts: Iterable[Fact], step: int) -> list[Fact]:
+    """Default-stamp seed facts, keeping anything set explicitly. An unset step lands just
+    before the store clock: on a fresh store that is the classic -1, on a re-run it is a
+    fresh key instead of a collision with the previous run's seeds."""
+    return [
+        f.model_copy(
+            update={
+                "producer": f.producer or "seed",
+                "step": f.step if f.step != -1 else step,
+            }
+        )
+        for f in facts
+    ]
+
+
 def _matched(view: View, reads: str) -> list[Fact]:
     return [f for pattern in reads.split() for f in view.query(pattern)]
+
+
+class _Armed(NamedTuple):
+    node: Node
+    input: list[Fact]
+    key: frozenset[Key]
+
+
+def _ready(
+    system: System, view: View, last_input: dict[str, frozenset[Key]]
+) -> list[_Armed]:
+    """Nodes whose trigger holds and whose matched input differs from the one they last fired
+    on. The store is append-only, so a node's matched set only ever grows; remembering the
+    last set per node is enough to fire exactly once per distinct input."""
+    armed = []
+    for node in system.nodes:
+        if not node.trigger(view):
+            continue
+        facts = _matched(view, node.reads) if node.reads else []
+        key = frozenset(f.key for f in facts)
+        if last_input.get(node.name) == key:
+            continue
+        armed.append(_Armed(node, facts, key))
+    return armed
 
 
 def _error_fact(name: str, message: str, step: int, exc: Exception | None) -> Fact:
@@ -73,57 +112,46 @@ class ReactiveExecutor:
         policy: Policy | None = None,
     ) -> AsyncIterator[StepReport]:
         active = policy or FireAll()
-        store.commit(
-            [
-                f if f.producer else f.model_copy(update={"producer": "seed"})
-                for f in seed
-            ]
-        )
-        fired: set[tuple[str, frozenset[tuple[str, int]]]] = set()
-        step = 0
+        store.commit(_seed(seed, store.next_step() - 1))
+        last_input: dict[str, frozenset[Key]] = {}
+        index = 0
         while True:
             view = store.snapshot()
-            ready = []
-            matched: dict[str, tuple[list[Fact], tuple]] = {}
-            for node in system.nodes:
-                if not node.trigger(view):
-                    continue
-                facts = _matched(view, node.reads) if node.reads else []
-                mkey = (node.name, frozenset(f.key for f in facts))
-                if mkey in fired:
-                    continue
-                ready.append(node)
-                matched[node.name] = (facts, mkey)
-            ready = active.select(ready, view)
-            if not ready:
-                yield StepReport(step, [], [])
+            step = store.next_step()
+            armed = _ready(system, view, last_input)
+            chosen = {n.name for n in active.select([a.node for a in armed], view)}
+            armed = [a for a in armed if a.node.name in chosen]
+            if not armed:
+                yield StepReport(step, index, [], [])
                 return
             results = await asyncio.gather(
-                *(node.invoke(matched[node.name][0], view) for node in ready),
+                *(a.node.invoke(a.input, view) for a in armed),
                 return_exceptions=True,
             )
             writes: list[Fact] = []
             errors: list[Fact] = []
-            for node, result in zip(ready, results):
-                fired.add(matched[node.name][1])
+            for a, result in zip(armed, results):
+                last_input[a.node.name] = a.key
                 if isinstance(result, BaseException):
                     if not isinstance(result, Exception):
                         raise result
-                    errors.append(_error_fact(node.name, str(result), step, result))
+                    errors.append(_error_fact(a.node.name, str(result), step, result))
                     continue
                 if result.status is Status.ERROR:
                     errors.append(
-                        _error_fact(node.name, result.error or "", step, None)
+                        _error_fact(a.node.name, result.error or "", step, None)
                     )
-                writes.extend(_stamp(result.writes, node.name, step))
+                writes.extend(_stamp(result.writes, a.node.name, step))
             store.commit([*writes, *errors])
-            report = StepReport(step, [node.name for node in ready], writes, errors)
+            report = StepReport(
+                step, index, [a.node.name for a in armed], writes, errors
+            )
             yield report
             if errors and self._halt:
                 return
             if terminate is not None and terminate.done(store.snapshot(), report):
                 return
-            step += 1
+            index += 1
 
     async def run(
         self,
