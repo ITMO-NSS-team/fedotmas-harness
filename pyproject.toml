@@ -27,6 +27,8 @@ optional-dependencies.llm = [
 [dependency-groups]
 dev = [
   "prek>=0.4.4",
+  "pytest>=8.4",
+  "pytest-asyncio>=1.2",
   "ruff>=0.15.16",
   "ty>=0.0.44",
 ]
@@ -35,3 +37,8 @@ examples = [
   "langchain-openai>=1.2.2",
   "pydantic-ai-slim[openai]>=1.106",
 ]
+
+[tool.pytest]
+ini_options.testpaths = [ "tests" ]
+ini_options.asyncio_mode = "auto"
+ini_options.asyncio_default_fixture_loop_scope = "function"
