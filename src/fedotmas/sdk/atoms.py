@@ -26,8 +26,8 @@ from typing import Any, Literal, Protocol, TypeVar, overload
 
 from pydantic import BaseModel
 
-from fedotmas.adapters import as_node
 from fedotmas.engine.contract import Fact, Node, Result, View
+from fedotmas.engine.node import as_node
 from fedotmas.sdk._template import render
 from fedotmas.sdk.flow import Flow, _Ctx
 

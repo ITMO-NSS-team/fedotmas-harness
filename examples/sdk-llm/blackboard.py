@@ -1,6 +1,6 @@
 """Blackboard: declarative prompt rules self-activate on conditions, no fixed topology.
 
-Every rule here is a prompt, not code: rule(prompt=...) is the rule-surface twin of the agent
+Every rule here is a prompt, not code: Rule(prompt=...) is the rule-surface twin of the agent
 atom, with the backend bound once at blackboard(). researcher and skeptic both wake on the
 same hypothesis and run in parallel; verifier waits on two independent facts at once, a
 condition not reducible to one read, so it spells out `when` as a tag list (`!` marks a fact
@@ -16,31 +16,31 @@ import asyncio
 from dotenv import load_dotenv
 
 from fedotmas.adapters.pydantic_ai import PydanticAI
-from fedotmas.sdk import blackboard, rule
+from fedotmas.sdk import Rule, blackboard
 
 
 async def main() -> None:
     load_dotenv()
     board = blackboard(
-        rule(
+        Rule(
             "hypothesizer",
             prompt="Propose one testable hypothesis answering the question.",
             reads="question",
             writes="hypothesis",
         ),
-        rule(
+        Rule(
             "researcher",
             prompt="State one piece of evidence that supports this hypothesis.",
             reads="hypothesis",
             writes="evidence",
         ),
-        rule(
+        Rule(
             "skeptic",
             prompt="Raise one serious objection to this hypothesis.",
             reads="hypothesis",
             writes="objection",
         ),
-        rule(
+        Rule(
             "verifier",
             prompt="Weigh the evidence against the objection and give a one-line conclusion.",
             input="Evidence: {evidence}\nObjection: {objection}",

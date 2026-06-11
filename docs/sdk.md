@@ -86,9 +86,10 @@ value across. That alias is the only bookkeeping the boundary costs.
 
 ## Running a flow
 
-`run(value, *, llm=None, budget=None, policy=None)` compiles the flow, seeds the input,
-executes to "the output exists" (capped by `budget` supersteps if given), and returns a
-`FlowRun`:
+`run(value, *, llm=None, budget=100, policy=None)` compiles the flow, seeds the input,
+executes to "the output exists" (capped by `budget` supersteps; the default 100 is a runaway
+guard for loops that never satisfy their `until`, pass `budget=None` to lift it), and returns
+an `Outcome`:
 
 ```python
 run.value    # the produced output, or None if the run never got there
@@ -103,7 +104,8 @@ run.view     # the final snapshot
 it with its message. `"budget"` means the step cap fired first, the usual suspect being a
 loop that never satisfied its `until`. `"stalled"` means the system went quiet without
 producing the output, which is almost always a wiring gap. A failing node never surfaces as
-a raw traceback out of `run`; it comes back as data on the `FlowRun`.
+a raw traceback out of `run`; it comes back as data on the `Outcome` (the full traceback
+rides in the error fact's `meta["traceback"]` when you need it).
 
 `stream(value, ...)` is the same call as an async iterator of `StepReport`, for watching the
 run unfold live. The `llm` argument is the default backend for every LLM node, covered next.
@@ -521,12 +523,12 @@ the incoming value under `entry`, runs the sub-system to its goal (`until`, defa
 is opaque.
 
 ```python
-from fedotmas.sdk import Flow, action, blackboard, nest, rule
+from fedotmas.sdk import Flow, Rule, action, blackboard, nest
 
 investigation = blackboard(
-    rule("hypothesizer", hypothesize, writes="hypothesis", reads="question"),
-    rule("researcher",   research,    writes="evidence",   reads="hypothesis"),
-    rule("verifier",     verify,      writes="conclusion", reads="evidence"),
+    Rule("hypothesizer", hypothesize, writes="hypothesis", reads="question"),
+    Rule("researcher",   research,    writes="evidence",   reads="hypothesis"),
+    Rule("verifier",     verify,      writes="conclusion", reads="evidence"),
 )
 
 solve: Flow[str, str] = nest(investigation, entry="question", out="conclusion")
@@ -583,8 +585,7 @@ and the written one is not yet), so a pipeline rule needs no trigger. You write 
 when activation is genuinely opportunistic, several rules contending on one fact, or a
 condition over more than one read. Its declarative form is a list of fact tags that must all
 exist, with a `!` prefix for a fact that must be absent; a callable over the `View` is the
-escape hatch for conditions beyond presence. `rule(...)` is the factory, lowercase like the
-atom factories; `Rule` is the dataclass behind it.
+escape hatch for conditions beyond presence.
 
 ```python
 @dataclass
@@ -593,7 +594,7 @@ class Rule:
     fn: StepFn | None = None                       # code step...
     writes: str = ""
     reads: str = ""
-    when: Callable[[View], bool] | list[str] | None = None   # defaults to produce-once
+    when: Callable[[View], bool] | Sequence[str] | None = None   # defaults to produce-once
     meta: dict = field(default_factory=dict)       # rides to the agent, e.g. an auction bid
     prompt: str | None = None                      # ...or a prompt step over the LLM seam
     input: str | None = None                       # template for what the model sees
@@ -608,16 +609,18 @@ def blackboard(*rules: Rule, llm: LLM | None = None) -> Board: ...
 that did not bind their own (a prompt rule with no backend from either level fails here, by
 name). A board runs symmetrically with a flow: `board.run(seed, goal=...)` takes the seed
 facts as a tag -> value dict and the tag to read the result back from, and returns the same
-`FlowRun`; `board.system` is the raw engine `System` when you want executor-level control. A
+`Outcome`; `board.stream` is the same run yielded step by step. An `llm` passed at
+`board.run(...)` is the last-resort backend, behind the board default and the per-rule
+binding. `board.system` is the raw engine `System` when you want executor-level control. A
 linear investigation is prompts all the way down and writes no triggers:
 
 ```python
-from fedotmas.sdk import blackboard, rule
+from fedotmas.sdk import Rule, blackboard
 
 investigation = blackboard(
-    rule("hypothesizer", prompt="Propose one testable hypothesis.", reads="question", writes="hypothesis"),
-    rule("researcher",   prompt="State one supporting piece of evidence.", reads="hypothesis", writes="evidence"),
-    rule("verifier",     prompt="Weigh and conclude in one line.", reads="evidence", writes="conclusion"),
+    Rule("hypothesizer", prompt="Propose one testable hypothesis.", reads="question", writes="hypothesis"),
+    Rule("researcher",   prompt="State one supporting piece of evidence.", reads="hypothesis", writes="evidence"),
+    Rule("verifier",     prompt="Weigh and conclude in one line.", reads="evidence", writes="conclusion"),
     llm=some_llm,
 )
 
@@ -642,10 +645,10 @@ spells out `when`:
 
 ```python
 blackboard(
-    rule("hypothesizer", hypothesize, writes="hypothesis", reads="question"),
-    rule("researcher",   research,    writes="evidence",   reads="hypothesis"),
-    rule("skeptic",      doubt,       writes="objection",  reads="hypothesis"),
-    rule("verifier",     verify,      writes="conclusion", reads="evidence",
+    Rule("hypothesizer", hypothesize, writes="hypothesis", reads="question"),
+    Rule("researcher",   research,    writes="evidence",   reads="hypothesis"),
+    Rule("skeptic",      doubt,       writes="objection",  reads="hypothesis"),
+    Rule("verifier",     verify,      writes="conclusion", reads="evidence",
          when=["evidence", "objection", "!conclusion"]),
 )
 ```
@@ -655,6 +658,12 @@ step 0: ['hypothesizer'] -> ['hypothesis']
 step 1: ['researcher', 'skeptic'] -> ['evidence', 'objection']
 step 2: ['verifier'] -> ['conclusion']
 ```
+
+One invariant to know: a rule re-fires per new version of the facts it names. The engine is
+edge-triggered, firing a node at most once per distinct set of facts matched by `reads` plus
+the positive `when` tags, so a fresh `evidence` re-arms `verifier` above. A rule with a
+callable `when` and no `reads` names no facts and fires at most once per run; give it `reads`
+if it is meant to wake again.
 
 The order fell out of the facts, not a wiring. Inside a blackboard there are no arrow types and
 so no static check; that is the price of an open shape, and the reason to keep blackboards for
@@ -696,10 +705,10 @@ the seam between them.
 | `Flow.loop`                  | iterate a state-preserving flow until a callable, state key, or `Condition` clears |
 | `sdk.nest`                   | run a whole sub-system (`Board`, `System`, or `Flow`) as one typed node |
 | `Flow.system`                | compile to a runnable `System`, given `entry`/`out` tags and a default `llm` |
-| `Flow.run` / `Flow.stream`   | compile and execute on one input; returns `FlowRun` / yields `StepReport` |
-| `sdk.FlowRun`                | the outcome: `.value`, `.ok`, `.reason`, `.errors`, `.steps` |
-| `sdk.rule`                   | a self-activating blackboard node, code (`fn`) or prompt (`prompt`/`input`/`returns`), plus `writes`/`reads`, optional `when` (tag list, `!` for absent) and `meta` |
-| `sdk.blackboard`             | assemble rules into a `Board`: `.run(seed, goal=...)`, `.system`, default `llm` for prompt rules |
+| `Flow.run` / `Flow.stream`   | compile and execute on one input; returns `Outcome` / yields `StepReport` |
+| `sdk.Outcome`                | the outcome: `.value`, `.ok`, `.reason`, `.errors`, `.steps` |
+| `sdk.Rule`                   | a self-activating blackboard node, code (`fn`) or prompt (`prompt`/`input`/`returns`), plus `writes`/`reads`, optional `when` (tag sequence, `!` for absent) and `meta` |
+| `sdk.blackboard`             | assemble rules into a `Board`: `.run(seed, goal=...)`, `.stream`, `.system`, default `llm` for prompt rules |
 
 Everything above re-exports from `fedotmas.sdk`. Two surfaces (`flow`, `blackboard`) filled by
 two atoms (`action` is code, `agent` is a model call). Flat imports are safe, no name shadows
@@ -717,8 +726,8 @@ Things to keep in mind:
 - State threading is declarative: `input` templates pick what the model sees, `into`/`merge`
   fold the reply back into a dict state, branch routes by a state key, loop stops on one.
   Reach for `action` only when behavior is genuinely code.
-- Failure is data. `FlowRun.reason` distinguishes goal, error, budget, and stalled; `errors`
-  names the failed node and its message.
+- Failure is data. `Outcome.reason` distinguishes goal, error, budget, and stalled; `errors`
+  names the failed node and its message, with the traceback in the fact's `meta`.
 - The types are a design-time contract. They are checked before the run and are `Any` at
   runtime, which is why the function signatures should be honest.
 - `+` and `.loop` enforce their stitch crisply. `branch` is looser, keep its cases homogeneous.

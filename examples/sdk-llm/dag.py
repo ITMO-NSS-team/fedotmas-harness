@@ -3,7 +3,7 @@
 The arrow algebra on stateless str -> str nodes: + is sequence, * is the parallel product
 whose tuple the next stage consumes. No node names a backend; the llm binds once as the
 default at .run(), which also derives the store, the seed, and the terminate condition, and
-hands back a FlowRun: .value, .ok, .reason, and the full .steps trace.
+hands back an Outcome: .value, .ok, .reason, and the full .steps trace.
 
 Needs an OpenAI key in .env. Run: uv run --group examples python examples/sdk-llm/dag.py
 """

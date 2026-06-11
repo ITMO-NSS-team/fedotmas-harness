@@ -7,7 +7,6 @@ the blackboard rules; not part of the public surface.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
 from pydantic import BaseModel
@@ -15,9 +14,10 @@ from pydantic import BaseModel
 from fedotmas.engine.contract import View
 
 
-class _Scope(Mapping[str, Any]):
-    """Template namespace: input fields first, then store tags, then `input` for the whole
-    incoming value. Raises KeyError for anything else, so a typo in a template names itself."""
+class _Scope:
+    """Template namespace for str.format_map, which needs only __getitem__: input fields
+    first, then store tags, then `input` for the whole incoming value. Raises KeyError for
+    anything else, so a typo in a template names itself."""
 
     def __init__(self, value: Any, view: View) -> None:
         self._value = value
@@ -34,12 +34,6 @@ class _Scope(Mapping[str, Any]):
         if key == "input":
             return self._value
         raise KeyError(key)
-
-    def __iter__(self) -> Any:
-        raise NotImplementedError
-
-    def __len__(self) -> int:
-        raise NotImplementedError
 
 
 def render(template: str, value: Any, view: View, node: str) -> str:

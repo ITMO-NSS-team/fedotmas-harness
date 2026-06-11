@@ -6,7 +6,7 @@ dropped into an outer System. Nesting is free because a subgraph is just an agen
 
 import asyncio
 
-from fedotmas.adapters import as_node
+from fedotmas.engine import as_node
 from fedotmas.engine.contract import Card, Fact, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store

@@ -3,7 +3,7 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from fedotmas.adapters import as_node
+from fedotmas.engine import as_node
 from fedotmas.engine.contract import Fact, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store

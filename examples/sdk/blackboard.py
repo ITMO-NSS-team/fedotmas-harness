@@ -12,7 +12,7 @@ board.run derives the store and the terminate condition from the seed and the go
 import asyncio
 
 from fedotmas.engine.contract import View
-from fedotmas.sdk import blackboard, rule
+from fedotmas.sdk import Rule, blackboard
 
 
 async def hypothesize(input: object, view: View) -> str:
@@ -33,10 +33,10 @@ async def verify(input: object, view: View) -> str:
 
 async def main() -> None:
     board = blackboard(
-        rule("hypothesizer", hypothesize, writes="hypothesis", reads="question"),
-        rule("researcher", research, writes="evidence", reads="hypothesis"),
-        rule("skeptic", object_, writes="objection", reads="hypothesis"),
-        rule(
+        Rule("hypothesizer", hypothesize, writes="hypothesis", reads="question"),
+        Rule("researcher", research, writes="evidence", reads="hypothesis"),
+        Rule("skeptic", object_, writes="objection", reads="hypothesis"),
+        Rule(
             "verifier",
             verify,
             writes="conclusion",

@@ -8,7 +8,7 @@ The board runs in its own inner store to its goal; outside it is one opaque arro
 import asyncio
 
 from fedotmas.engine.contract import View
-from fedotmas.sdk import Flow, action, blackboard, nest, rule
+from fedotmas.sdk import Flow, Rule, action, blackboard, nest
 
 
 async def hypothesize(input: object, view: View) -> str:
@@ -24,9 +24,9 @@ async def verify(input: object, view: View) -> str:
 
 
 investigation = blackboard(
-    rule("hypothesizer", hypothesize, writes="hypothesis", reads="question"),
-    rule("researcher", research, writes="evidence", reads="hypothesis"),
-    rule("verifier", verify, writes="conclusion", reads="evidence"),
+    Rule("hypothesizer", hypothesize, writes="hypothesis", reads="question"),
+    Rule("researcher", research, writes="evidence", reads="hypothesis"),
+    Rule("verifier", verify, writes="conclusion", reads="evidence"),
 )
 
 solve: Flow[str, str] = nest(investigation, entry="question", out="conclusion")

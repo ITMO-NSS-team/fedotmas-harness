@@ -11,11 +11,21 @@ other framework the same way to swap it out.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
+from pydantic import BaseModel
 from pydantic_ai import Agent
 
 from fedotmas.engine.contract import View
+
+
+def _as_text(input: Any) -> str:
+    if isinstance(input, str):
+        return input
+    if isinstance(input, BaseModel):
+        return input.model_dump_json()
+    return json.dumps(input, ensure_ascii=False, default=str)
 
 
 class PydanticAI:
@@ -33,5 +43,5 @@ class PydanticAI:
                 self._model, output_type=returns, system_prompt=prompt, **self._settings
             )
             self._agents[(prompt, returns)] = agent
-        result = await agent.run(input if isinstance(input, str) else str(input))
+        result = await agent.run(_as_text(input))
         return result.output

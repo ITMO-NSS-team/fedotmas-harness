@@ -27,9 +27,9 @@ from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel
 
-from fedotmas.adapters import as_node
 from fedotmas.engine.contract import Fact, Node, Result, Status, View
 from fedotmas.engine.executor import ReactiveExecutor
+from fedotmas.engine.node import as_node
 from fedotmas.engine.report import Run, StepReport
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
@@ -59,7 +59,9 @@ class Condition(BaseModel):
     """
 
     key: str
-    op: Literal["truthy", "not", "eq", "ne", "gte", "lte", "exists"] = "truthy"
+    op: Literal["truthy", "not", "eq", "ne", "gt", "lt", "gte", "lte", "exists"] = (
+        "truthy"
+    )
     value: Any = None
 
     def check(self, state: Any) -> bool:
@@ -78,6 +80,15 @@ class Condition(BaseModel):
             return v == self.value
         if self.op == "ne":
             return v != self.value
+        if v is None:
+            raise ValueError(
+                f"Condition(key={self.key!r}, op={self.op!r}): the state has no "
+                f"{self.key!r} to compare"
+            )
+        if self.op == "gt":
+            return v > self.value
+        if self.op == "lt":
+            return v < self.value
         if self.op == "gte":
             return v >= self.value
         return v <= self.value
@@ -138,12 +149,12 @@ def _inner_guard(run: Run, out: str, what: str) -> None:
 
 
 @dataclass
-class FlowRun:
-    """The outcome of Flow.run: the engine Run plus the flow's out tag, read back as one
-    object. `value` is the produced output (None if the run never reached it), `ok` is
-    "finished and produced the output", and `reason` says how the run ended: "goal" (output
-    produced), "error" (a node failed, see `errors`), "budget" (step cap hit first), or
-    "stalled" (the system went quiet without producing the output: a wiring gap).
+class Outcome:
+    """The outcome of a run surface (Flow.run, Board.run): the engine Run plus the out tag,
+    read back as one object. `value` is the produced output (None if the run never reached
+    it), `ok` is "finished and produced the output", and `reason` says how the run ended:
+    "goal" (output produced), "error" (a node failed, see `errors`), "budget" (step cap hit
+    first), or "stalled" (the system went quiet without producing the output: a wiring gap).
     """
 
     run: Run
@@ -199,48 +210,53 @@ class Flow(Generic[A, B]):
             agents = [*agents, _alias_agent(last, out)]
         return System(agents)
 
+    def _prepare(self, llm: LLM | None, budget: int | None) -> tuple[System, Terminate]:
+        system = self.system(entry="in", out="out", llm=llm)
+        terminate: Terminate = Goal(lambda v: v.exists("out"))
+        if budget is not None:
+            terminate = terminate | Budget(budget)
+        return system, terminate
+
     async def run(
         self,
         value: A,
         *,
         llm: LLM | None = None,
-        budget: int | None = None,
+        budget: int | None = 100,
         policy: Policy | None = None,
-    ) -> FlowRun:
+    ) -> Outcome:
         """Compile and execute the flow on one input. The store, the seed fact, and the
-        terminate condition (output produced, optionally capped by `budget` supersteps) are
-        derived, so the caller holds no tags. Returns a FlowRun: `.value`, `.ok`, `.reason`,
-        `.errors`, and the full `.steps` trace.
+        terminate condition (output produced, capped by `budget` supersteps; the default 100
+        is a runaway guard, None lifts the cap) are derived, so the caller holds no tags.
+        Returns an Outcome: `.value`, `.ok`, `.reason`, `.errors`, and the full `.steps`
+        trace.
         """
-        system = self.system(entry="in", out="out", llm=llm)
-        terminate: Terminate = Goal(lambda v: v.exists("out"))
-        if budget is not None:
-            terminate = terminate | Budget(budget)
-        store = Store()
+        system, terminate = self._prepare(llm, budget)
         run = await ReactiveExecutor().run(
             system,
-            store,
+            Store(),
             seed=[Fact(tag="in", value=value)],
             terminate=terminate,
             policy=policy,
         )
-        return FlowRun(run, "out")
+        return Outcome(run, "out")
 
     async def stream(
         self,
         value: A,
         *,
         llm: LLM | None = None,
-        budget: int | None = None,
+        budget: int | None = 100,
         policy: Policy | None = None,
     ) -> AsyncIterator[StepReport]:
         """The streaming form of .run: yields each StepReport as the run unfolds."""
-        system = self.system(entry="in", out="out", llm=llm)
-        terminate: Terminate = Goal(lambda v: v.exists("out"))
-        if budget is not None:
-            terminate = terminate | Budget(budget)
+        system, terminate = self._prepare(llm, budget)
         async for report in ReactiveExecutor().stream(
-            system, Store(), seed=[Fact(tag="in", value=value)], terminate=terminate
+            system,
+            Store(),
+            seed=[Fact(tag="in", value=value)],
+            terminate=terminate,
+            policy=policy,
         ):
             yield report
 
@@ -425,6 +441,8 @@ def gather_all(*flows: Flow[A, B]) -> Flow[A, list[B]]:
     to fold the list into one value. Named gather_all, not gather, so it never shadows
     asyncio.gather.
     """
+    if not flows:
+        raise ValueError("gather_all needs at least one flow")
     return _GatherAll(flows)
 
 
@@ -449,8 +467,8 @@ class _Nest(Flow[A, B]):
             system = self._target.system(entry=inner_entry, out=inner_out, llm=ctx.llm)
         elif isinstance(self._target, System):
             system = self._target
-        else:  # a Board, or anything else that exposes its System
-            system = self._target.system
+        else:  # a Board: compile with the flow's default llm as the fallback backend
+            system = self._target.compile(ctx.llm)
         until = self._until or Goal(lambda v: v.exists(inner_out))
 
         async def invoke(input: Any, view: View) -> Result:

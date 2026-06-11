@@ -55,7 +55,7 @@ cover all of it. Needs an OpenAI key in `.env`; run with the examples group, e.g
 
 | Shape | File | SDK surface |
 |---|---|---|
-| DAG with a parallel block | `sdk-llm/dag.py` | stateless arrows: `extract + (support * oppose) + balance`, `Flow.run` and `FlowRun` |
+| DAG with a parallel block | `sdk-llm/dag.py` | stateless arrows: `extract + (support * oppose) + balance`, `Flow.run` and `Outcome` |
 | Blackboard | `sdk-llm/blackboard.py` | declarative prompt rules (`rule(prompt=...)`), opportunistic `when` as a tag list, `input` template over store tags, `board.run` |
 | Master orchestrator | `sdk-llm/orchestrator.py` | structured plan sized at runtime, `action` as the code escape hatch for dynamic fan-out |
 | Handoff / Swarm | `sdk-llm/swarm.py` | stateful atoms end to end: `input=` templates, `merge=` structured handoff, `branch("station")` inside `.loop(until="done")` |

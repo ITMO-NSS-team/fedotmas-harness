@@ -39,7 +39,7 @@ what it reads, and the data dependency creates the order.
 ```python
 import asyncio
 
-from fedotmas.adapters import as_node
+from fedotmas.engine import as_node
 from fedotmas.engine import Fact, Goal, ReactiveExecutor, Result, Store, System, View
 
 
@@ -157,8 +157,10 @@ class Node(Protocol):
 ```
 
 - `name` identifies the node and stamps every fact it writes.
-- `reads` is the pattern of facts this node consumes. The engine queries it to decide what
-  to pass as `input` and to track what the node has already seen.
+- `reads` is the pattern of facts this node consumes, or several patterns separated by
+  whitespace. The engine queries it to decide what to pass as `input` and to track what the
+  node has already seen: the matched facts are the node's re-fire identity (see
+  [Triggers](#triggers-and-the-fire-once-rule)).
 - `trigger(view)` returns `True` when the node wants to run, given the current snapshot.
 - `invoke(input, view)` does the work and returns a `Result`. It is `async`, so a node is
   free to call an LLM, hit the network, or just compute.
@@ -177,7 +179,7 @@ def as_node(fn, *, name, reads="", trigger=None) -> Node: ...
 ```
 
 `fn` has the signature `async (input, view) -> Result`. If you do not pass a `trigger`, the
-default is "fire when at least one fact matches `reads`":
+default is "fire when every `reads` pattern has a match":
 
 ```python
 # these are the same agent
@@ -290,8 +292,8 @@ Each iteration of the loop:
 5. `await` all chosen agents at once with `asyncio.gather`.
 6. Stamp their writes with the agent name and step, commit them in one batch together with
    error facts for any agent that failed, yield a `StepReport`.
-7. If any agent failed, stop. Otherwise check `terminate`. If done, stop. Otherwise
-   increment the step and repeat.
+7. If any agent failed, stop (default; `halt_on_error=False` keeps going). Otherwise check
+   `terminate`. If done, stop. Otherwise increment the step and repeat.
 
 If no agent is ready, the system has gone quiet. The executor yields one final empty
 `StepReport` and stops on its own, even without a terminate condition.
@@ -302,7 +304,10 @@ A failing agent does not crash the run with a traceback; it becomes data. When `
 raises (or returns `Status.ERROR`), the engine commits a fact tagged `error:{agent name}`
 whose value is the message, records it in `StepReport.errors`, finishes the step for the
 agents that ran alongside, and stops. The `Run` comes back with `status=ERROR` and
-`reason="error"`.
+`reason="error"`. The message keeps only `str(exc)`; the full traceback rides in the error
+fact's `meta["traceback"]` for debugging. Stopping is the default, not a law:
+`ReactiveExecutor(halt_on_error=False)` records the error fact the same way but lets the rest
+of the system keep running, and the `Run` still ends with `status=ERROR`.
 
 ```python
 run = await ReactiveExecutor().run(system, store, seed=...)
@@ -333,6 +338,11 @@ This is why versioned tags matter. When the critic reads `draft:1` and writes `v
 the generator's input is now a new fact set, so it is allowed to fire again and produce
 `draft:2`. Each turn of the loop consumes genuinely new facts, so each turn is a distinct
 firing. The loop advances instead of spinning or stalling.
+
+The flip side: the memo key is built from `reads`, not from the trigger. A node with empty
+`reads` has the empty fact set as its identity and fires at most once per run, no matter how
+long its trigger stays true. A node meant to re-fire on new facts must name them in `reads`
+(several patterns are fine, whitespace-separated).
 
 In practice: use the default `exists` trigger for one-shot agents, and write an explicit
 trigger for loops and joins. Here is a join, where the aggregator should wait for all three
@@ -377,7 +387,7 @@ superstep. If you pass none, the run continues until the system goes quiet on it
 
 ```python
 class Terminate(Protocol):
-    def done(self, view: View, report) -> bool: ...
+    def done(self, view: View, report: StepReport) -> bool: ...
 ```
 
 Three are built in:
@@ -397,6 +407,9 @@ safety cap:
 terminate = Goal(approved) | Budget(max_steps=8)
 ```
 
+The operators live on the built-in conditions; for a `Terminate` you implemented yourself,
+`engine.all_of` / `engine.any_of` compose anything matching the protocol.
+
 That reads as "stop when the work is approved, or after 8 steps regardless". The cap matters
 for loops where the goal might never be reached.
 
@@ -409,7 +422,7 @@ same engine, the only new ingredients are explicit triggers and a composed termi
 ```python
 import asyncio
 
-from fedotmas.adapters import as_node
+from fedotmas.engine import as_node
 from fedotmas.engine import Budget, Fact, Goal, ReactiveExecutor, Result, Store, System, View
 
 THRESHOLD = 3
@@ -517,7 +530,7 @@ Everything below re-exports flat from `fedotmas.engine`, e.g.
 | `engine.Run` / `StepReport`             | the trace: status, reason, fired, writes, errors |
 | `engine.FireAll` / `AuctionSelect`      | resolve who fires in a step                 |
 | `engine.Goal` / `Budget` / `Quiescence` | when to stop, composable with `&` `|`       |
-| `adapters.as_node`                      | wrap an async function as a node            |
+| `engine.as_node`                      | wrap an async function as a node            |
 
 Things to keep in mind:
 

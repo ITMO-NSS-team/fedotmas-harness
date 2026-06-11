@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import traceback
 from collections.abc import AsyncIterator, Iterable
 from typing import Protocol
 
-from fedotmas.engine.contract import Fact, Status
+from fedotmas.engine.contract import Fact, Status, View
 from fedotmas.engine.policy import FireAll, Policy
 from fedotmas.engine.report import Run, StepReport
 from fedotmas.engine.store import Store
@@ -37,19 +38,31 @@ class Executor(Protocol):
 
 
 def _stamp(facts: Iterable[Fact], producer: str, step: int) -> list[Fact]:
-    out = list(facts)
-    for f in out:
-        f.producer = producer
-        f.step = step
-    return out
+    return [f.model_copy(update={"producer": producer, "step": step}) for f in facts]
 
 
-def _error_fact(name: str, message: str, step: int, kind: str = "") -> Fact:
-    meta = {"type": kind} if kind else {}
+def _matched(view: View, reads: str) -> list[Fact]:
+    return [f for pattern in reads.split() for f in view.query(pattern)]
+
+
+def _error_fact(name: str, message: str, step: int, exc: Exception | None) -> Fact:
+    meta = {}
+    if exc is not None:
+        meta = {
+            "type": type(exc).__name__,
+            "traceback": "".join(traceback.format_exception(exc)),
+        }
     return Fact(tag=f"error:{name}", value=message, producer=name, step=step, meta=meta)
 
 
 class ReactiveExecutor:
+    """The superstep loop. `halt_on_error` (default True) ends the run on the first failed
+    node; with False the error is still committed as a fact and reported, but the rest of the
+    system keeps running and the Run carries Status.ERROR at the end."""
+
+    def __init__(self, *, halt_on_error: bool = True) -> None:
+        self._halt = halt_on_error
+
     async def stream(
         self,
         system: System,
@@ -70,7 +83,7 @@ class ReactiveExecutor:
             for node in system.nodes:
                 if not node.trigger(view):
                     continue
-                facts = view.query(node.reads) if node.reads else []
+                facts = _matched(view, node.reads) if node.reads else []
                 mkey = (node.name, frozenset(f.key for f in facts))
                 if mkey in fired:
                     continue
@@ -91,17 +104,17 @@ class ReactiveExecutor:
                 if isinstance(result, BaseException):
                     if not isinstance(result, Exception):
                         raise result
-                    errors.append(
-                        _error_fact(node.name, str(result), step, type(result).__name__)
-                    )
+                    errors.append(_error_fact(node.name, str(result), step, result))
                     continue
                 if result.status is Status.ERROR:
-                    errors.append(_error_fact(node.name, result.error or "", step))
+                    errors.append(
+                        _error_fact(node.name, result.error or "", step, None)
+                    )
                 writes.extend(_stamp(result.writes, node.name, step))
             store.commit([*writes, *errors])
             report = StepReport(step, [node.name for node in ready], writes, errors)
             yield report
-            if errors:
+            if errors and self._halt:
                 return
             if terminate is not None and terminate.done(store.snapshot(), report):
                 return
@@ -122,9 +135,11 @@ class ReactiveExecutor:
                 system, store, seed=seed, terminate=terminate, policy=policy
             )
         ]
-        status, reason = Status.OK, "terminate"
-        if steps and steps[-1].errors:
-            status, reason = Status.ERROR, "error"
+        status = Status.ERROR if any(s.errors for s in steps) else Status.OK
+        if self._halt and steps and steps[-1].errors:
+            reason = "error"
         elif steps and not steps[-1].fired:
             reason = "quiescence"
+        else:
+            reason = "terminate"
         return Run(status, steps, store.snapshot(), reason)

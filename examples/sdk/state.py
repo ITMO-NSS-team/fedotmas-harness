@@ -71,7 +71,7 @@ async def main() -> None:
     print("merge + branch('station') + loop('done'):", run.value)
 
     # a failing node ends the run as an error outcome, not a traceback
-    bad = agent("bad", prompt="x", input="{missing_key}")
+    bad = agent("bad", prompt="x", input="{missing_key}", takes=dict, returns=str)
     run = await bad.run({"ticket": "x"}, llm=FakeLLM(lambda p, c: c))
     assert not run.ok and run.reason == "error", run.reason
     assert run.errors and run.errors[0].producer.startswith("bad"), run.errors

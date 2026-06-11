@@ -7,11 +7,19 @@ the submodules.
 
 from fedotmas.engine.contract import Card, Fact, Node, Result, Status, View
 from fedotmas.engine.executor import Executor, ReactiveExecutor
+from fedotmas.engine.node import as_node
 from fedotmas.engine.policy import AuctionSelect, FireAll, Policy
 from fedotmas.engine.report import Run, StepReport
 from fedotmas.engine.store import Snapshot, Store
 from fedotmas.engine.system import System
-from fedotmas.engine.terminate import Budget, Goal, Quiescence, Terminate
+from fedotmas.engine.terminate import (
+    Budget,
+    Goal,
+    Quiescence,
+    Terminate,
+    all_of,
+    any_of,
+)
 
 __all__ = [
     "AuctionSelect",
@@ -34,4 +42,7 @@ __all__ = [
     "System",
     "Terminate",
     "View",
+    "all_of",
+    "any_of",
+    "as_node",
 ]
