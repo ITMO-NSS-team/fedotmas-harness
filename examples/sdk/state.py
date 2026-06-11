@@ -1,9 +1,10 @@
-"""TDD spec for the stateful surface: templates, into/merge, key-driven loop and branch, run.
+"""TDD spec for the stateful surface: templates, .into/.merge, key-driven loop and branch, run.
 
 This pins the declarative state machinery: an agent node picks what the model sees with an
-`input` template over the state, puts the reply back with `into` (one key) or `merge`
-(structured reply folded into the state), a branch routes by a state key, a loop stops on a
-state key, and Flow.run executes the whole thing with the llm bound once as the default.
+`input` template over the state, the reply goes back into the state by composition, `.into`
+(one key) or `.merge` (structured reply folded in), a branch routes by a state key, a loop
+stops on a state key, and Flow.run executes the whole thing with the llm bound once as the
+default.
 A failing node ends the run with reason "error" instead of a traceback. The asserts are the
 contract; a FakeLLM stands in for the backend so the spec runs offline.
 """
@@ -33,13 +34,14 @@ class Patch(BaseModel):
 
 
 async def main() -> None:
-    # into=: template picks from the state, the reply lands under one key.
+    # .into(): template picks from the state, the reply lands under one key.
     note = agent(
         "note",
         prompt="Restate the ticket in one line.",
         input="Ticket: {ticket}",
-        into="summary",
-    )
+        takes=dict,
+        returns=str,
+    ).into("summary")
     run = await note.run(
         {"ticket": "double charge"},
         llm=FakeLLM(lambda p, content: f"noted({content})"),
@@ -49,16 +51,16 @@ async def main() -> None:
         "ticket": "double charge",
         "summary": "noted(Ticket: double charge)",
     }, run.value
-    print("into + template:", run.value)
+    print(".into + template:", run.value)
 
-    # merge= + branch by state key + loop until state key: a two-hop handoff.
+    # .merge() + branch by state key + loop until state key: a two-hop handoff.
     hop = agent(
         "hop",
         prompt="Handle and hand off.",
         input="{ticket}",
+        takes=dict,
         returns=Patch,
-        merge=True,
-    )
+    ).merge()
     handle = branch("station", {"triage": hop, "tech": hop})
     flow = handle.loop(until="done")
     hops = iter([Patch(station="tech", done=False), Patch(station="tech", done=True)])
@@ -68,7 +70,7 @@ async def main() -> None:
         budget=8,
     )
     assert run.ok and run.value["done"] and run.value["station"] == "tech", run.value
-    print("merge + branch('station') + loop('done'):", run.value)
+    print(".merge + branch('station') + loop('done'):", run.value)
 
     # a failing node ends the run as an error outcome, not a traceback
     bad = agent("bad", prompt="x", input="{missing_key}", takes=dict, returns=str)

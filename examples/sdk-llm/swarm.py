@@ -2,7 +2,7 @@
 
 The stateful surface end to end, with no code in any node. Each station is an agent over a
 dict state: its `input` template picks the ticket out of the state, its structured reply
-(merge=True) folds back in, and because the reply's `station` field is part of that fold, the
+(.merge()) folds back in, and because the reply's `station` field is part of that fold, the
 handoff target is data the model chose, constrained to real stations by a Literal. The branch
 routes by the state key ("station"), the loop stops on a state key ("done"), so the whole
 swarm is strings and types: exactly what a program that emits systems can write.
@@ -43,9 +43,9 @@ triage = agent(
         "tech for crashes."
     ),
     input="{ticket}",
+    takes=dict,
     returns=TriageNote,
-    merge=True,
-)
+).merge()
 
 billing = agent(
     "billing",
@@ -54,9 +54,9 @@ billing = agent(
         "billing_note, then hand the remaining technical issue to station tech."
     ),
     input="{ticket}",
+    takes=dict,
     returns=BillingNote,
-    merge=True,
-)
+).merge()
 
 tech = agent(
     "tech",
@@ -65,9 +65,9 @@ tech = agent(
         "and set done to true."
     ),
     input="{ticket}",
+    takes=dict,
     returns=TechNote,
-    merge=True,
-)
+).merge()
 
 handle = branch("station", {"triage": triage, "billing": billing, "tech": tech})
 swarm = handle.loop(until="done")

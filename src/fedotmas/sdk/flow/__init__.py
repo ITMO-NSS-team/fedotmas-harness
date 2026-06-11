@@ -2,8 +2,8 @@
 
 A Flow[A, B] is a fragment from an input of type A to an output of type B. Flows compose into
 whole systems: + is sequence, * is the binary parallel product, gather_all its n-ary form, branch
-routes to one case by a label, .loop iterates a state-preserving flow, nest runs a sub-system
-as one opaque node. The type parameters make each stitch checkable: a + b only type-checks when
+routes to one case by a label, .loop iterates a state-preserving flow, .into and .merge thread
+a dict state past a step, nest runs a sub-system as one opaque node. The type parameters make each stitch checkable: a + b only type-checks when
 b accepts what a produces, so an unjoined parallel (a tuple the next stage must consume) becomes
 a type error, not a runtime footgun.
 

@@ -8,11 +8,11 @@ which both compile to. Both return a Flow[A, B] and compose with the same operat
 An LLM node is fully declarative: strings, types, and keys. `prompt` is the static system
 prompt. `input` is a template for what the model sees, rendered over the node's input (dict
 keys or model fields) with store tags as fallback, so a stateful node picks what it feeds the
-model without code. `into` and `merge` put the reply back into a dict state, which is what
-lets the same atoms fill loops, swarms, and chats that thread state, not only stateless
-chains. `labels` constrains the output to one of a finite label set (a classifier, the node
-shape that drives branch). None of these accept a callable; action is the escape hatch when
-behavior must be code.
+model without code. `labels` constrains the output to one of a finite label set (a
+classifier, the node shape that drives branch). Putting the reply back into a dict state is
+composition, not a call parameter: `.into(key)` and `.merge()` on the resulting flow thread
+the state, which is what lets the same atoms fill loops, swarms, and chats. None of these
+accept a callable; action is the escape hatch when behavior must be code.
 
 The LLM seam lives here with its only callers. The SDK never imports a provider: a backend is
 injected via `llm` on the node or as the default at .system()/.run(), anything with a
@@ -23,8 +23,6 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal, Protocol, TypeVar, overload
-
-from pydantic import BaseModel
 
 from fedotmas.engine.contract import Fact, Node, Result, View
 from fedotmas.engine.node import as_node
@@ -81,24 +79,6 @@ class LLM(Protocol):
     ) -> Any: ...
 
 
-def _put_back(value: Any, reply: Any, into: str | None, merge: bool, node: str) -> Any:
-    if into is not None:
-        if not isinstance(value, dict):
-            raise TypeError(
-                f"node {node!r}: into= threads a dict state, got {type(value).__name__}"
-            )
-        return {**value, into: reply}
-    if merge:
-        patch = reply.model_dump() if isinstance(reply, BaseModel) else reply
-        if not isinstance(value, dict) or not isinstance(patch, dict):
-            raise TypeError(
-                f"node {node!r}: merge= needs a dict state and a structured reply, got "
-                f"{type(value).__name__} and {type(reply).__name__}"
-            )
-        return {**value, **patch}
-    return reply
-
-
 class _LLMAtom(Flow[Any, Any]):
     """A leaf whose body is a prompt over the LLM seam. The backend binds per node or falls
     back to the compile-time default in _Ctx; binding neither is a compile-time error."""
@@ -110,19 +90,13 @@ class _LLMAtom(Flow[Any, Any]):
         prompt: str,
         input: str | None,
         returns: Any,
-        into: str | None,
-        merge: bool,
         llm: LLM | None,
         labels: list[str] | None = None,
     ) -> None:
-        if into is not None and merge:
-            raise ValueError(f"node {name!r}: into= and merge= are mutually exclusive")
         self._name = name
         self._prompt = prompt
         self._input = input
         self._returns = returns
-        self._into = into
-        self._merge = merge
         self._llm = llm
         self._labels = labels
 
@@ -134,15 +108,14 @@ class _LLMAtom(Flow[Any, Any]):
                 "default at .system()/.run()"
             )
         name, prompt, template = self._name, self._prompt, self._input
-        returns, into, merge = self._returns, self._into, self._merge
-        labels = self._labels
+        returns, labels = self._returns, self._labels
 
         async def invoke(value: Any, view: View) -> Any:
             content = render(template, value, view, name) if template else value
             reply = await llm.complete(prompt, content, view, returns=returns)
             if labels is not None and reply not in labels:
                 raise ValueError(f"agent {name!r} returned {reply!r}, not in {labels}")
-            return _put_back(value, reply, into, merge, name)
+            return reply
 
         out = ctx.fresh(name)
         return [_action_node(out, invoke, entry, out)], out
@@ -172,36 +145,6 @@ def agent(
     takes: type[A] = ...,
     llm: LLM | None = ...,
 ) -> Flow[A, str]: ...
-@overload
-def agent(
-    name: str,
-    *,
-    prompt: str,
-    labels: list[str],
-    into: str,
-    input: str | None = ...,
-    llm: LLM | None = ...,
-) -> Flow[dict, dict]: ...
-@overload
-def agent(
-    name: str,
-    *,
-    prompt: str,
-    into: str,
-    input: str | None = ...,
-    returns: type = ...,
-    llm: LLM | None = ...,
-) -> Flow[dict, dict]: ...
-@overload
-def agent(
-    name: str,
-    *,
-    prompt: str,
-    merge: bool,
-    input: str | None = ...,
-    returns: type = ...,
-    llm: LLM | None = ...,
-) -> Flow[dict, dict]: ...
 def agent(
     name: str,
     *,
@@ -210,8 +153,6 @@ def agent(
     takes: type = str,
     returns: type = str,
     labels: list[str] | None = None,
-    into: str | None = None,
-    merge: bool = False,
     llm: LLM | None = None,
 ) -> Flow[Any, Any]:
     """Lift a prompt into an LLM agent: a Flow atom whose body is data, not code. Always a
@@ -223,36 +164,20 @@ def agent(
     takes/returns to type the boundary; a structured backend produces the `returns` type
     directly. `labels` makes the agent a classifier: the output is one label from the set,
     constrained at the backend via a Literal and validated regardless, the shape that drives
-    branch when the route is the model's choice. For a node inside stateful composition,
-    `into="key"` writes the reply under that key of a dict state and passes the rest through,
-    while `merge=True` folds a structured reply's fields into the state; both make the node
-    Flow[dict, dict]. The backend binds via `llm` here or via the default at
-    .system()/.run(); neither bound fails at compile time.
+    branch when the route is the model's choice. To thread a dict state, compose the result:
+    `agent(..., takes=dict, returns=...).into("key")` puts the reply under one key,
+    `.merge()` folds a structured reply's fields in. The backend binds via `llm` here or via
+    the default at .system()/.run(); neither bound fails at compile time.
     """
     if labels is not None:
-        if returns is not str or merge:
+        if returns is not str:
             raise ValueError(
                 f"agent {name!r}: labels= fixes the output to one label; it does not "
-                "combine with returns= or merge= (into= is fine: the label lands in state)"
+                "combine with returns="
             )
         # built via __getitem__ because the labels are runtime data, not a static type form
         lit = Literal.__getitem__(tuple(labels))
         return _LLMAtom(
-            name,
-            prompt=prompt,
-            input=input,
-            returns=lit,
-            into=into,
-            merge=False,
-            llm=llm,
-            labels=labels,
+            name, prompt=prompt, input=input, returns=lit, llm=llm, labels=labels
         )
-    return _LLMAtom(
-        name,
-        prompt=prompt,
-        input=input,
-        returns=returns,
-        into=into,
-        merge=merge,
-        llm=llm,
-    )
+    return _LLMAtom(name, prompt=prompt, input=input, returns=returns, llm=llm)

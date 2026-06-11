@@ -24,8 +24,10 @@ from fedotmas.sdk.flow._nodes import (
     _Ctx,
     _gather_node,
     _inner_guard,
+    _into_node,
     _loop_finish_node,
     _loop_iterate_node,
+    _merge_node,
 )
 from fedotmas.sdk.flow._outcome import Outcome
 
@@ -119,11 +121,18 @@ class Flow(Generic[A, B]):
     def __mul__(self, other: Flow[A, C]) -> Flow[A, tuple[B, C]]:
         return _Par(self, other)
 
-    def then(self, other: Flow[B, C]) -> Flow[A, C]:
-        return _Seq(self, other)
+    def into(self: Flow[dict, Any], key: str) -> Flow[dict, dict]:
+        """Thread a dict state past this flow: run it on the state, put its output under
+        `key`, pass the other keys through unchanged. State-threading is composition, not a
+        call parameter, so it works on any flow (an agent, an action, a nested system), and
+        it is what lets stateless atoms fill loops, swarms, and chats."""
+        return _Into(self, key)
 
-    def par(self, other: Flow[A, C]) -> Flow[A, tuple[B, C]]:
-        return _Par(self, other)
+    def merge(self: Flow[dict, Any]) -> Flow[dict, dict]:
+        """Thread a dict state past this flow: fold the fields of its structured output into
+        the state (a BaseModel output is dumped first). The output decides which keys change,
+        which is what lets a handoff target ride inside the reply."""
+        return _Merge(self)
 
     def loop(
         self: Flow[A, A],
@@ -160,6 +169,27 @@ class _Par(Flow[Any, Any]):
         ra, rout = self._right._build(ctx, entry)
         out = ctx.fresh("par")
         return [*la, *ra, _gather_node(out, [lout, rout], out)], out
+
+
+class _Into(Flow[dict, dict]):
+    def __init__(self, inner: Flow[Any, Any], key: str) -> None:
+        self._inner = inner
+        self._key = key
+
+    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
+        nodes, reply = self._inner._build(ctx, entry)
+        out = ctx.fresh("into")
+        return [*nodes, _into_node(out, entry, reply, self._key)], out
+
+
+class _Merge(Flow[dict, dict]):
+    def __init__(self, inner: Flow[Any, Any]) -> None:
+        self._inner = inner
+
+    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
+        nodes, reply = self._inner._build(ctx, entry)
+        out = ctx.fresh("merge")
+        return [*nodes, _merge_node(out, entry, reply)], out
 
 
 class _Loop(Flow[Any, Any]):

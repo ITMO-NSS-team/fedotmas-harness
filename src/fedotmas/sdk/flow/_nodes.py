@@ -11,6 +11,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel
+
 from fedotmas.engine.contract import Fact, Node, Result, Status, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.node import as_node
@@ -53,6 +55,41 @@ def _alias_node(src: str, out: str, name: str | None = None) -> Node:
         return Result(writes=[Fact(tag=out, value=view.value(src))])
 
     return as_node(invoke, name=name or f"alias:{out}", reads=src)
+
+
+def _into_node(name: str, state_src: str, reply_src: str, key: str) -> Node:
+    """Thread a dict state past a step: the reply lands under `key`, the other keys pass
+    through unchanged."""
+
+    async def invoke(input: Any, view: View) -> Result:
+        state = view.value(state_src)
+        if not isinstance(state, dict):
+            raise TypeError(
+                f"{name!r}: .into() threads a dict state, got {type(state).__name__}"
+            )
+        return Result(
+            writes=[Fact(tag=name, value={**state, key: view.value(reply_src)})]
+        )
+
+    return as_node(invoke, name=name, reads=f"{state_src} {reply_src}")
+
+
+def _merge_node(name: str, state_src: str, reply_src: str) -> Node:
+    """Thread a dict state past a step: the structured reply's fields fold into the state
+    (a BaseModel reply is dumped first)."""
+
+    async def invoke(input: Any, view: View) -> Result:
+        state = view.value(state_src)
+        reply = view.value(reply_src)
+        patch = reply.model_dump() if isinstance(reply, BaseModel) else reply
+        if not isinstance(state, dict) or not isinstance(patch, dict):
+            raise TypeError(
+                f"{name!r}: .merge() needs a dict state and a structured reply, got "
+                f"{type(state).__name__} and {type(reply).__name__}"
+            )
+        return Result(writes=[Fact(tag=name, value={**state, **patch})])
+
+    return as_node(invoke, name=name, reads=f"{state_src} {reply_src}")
 
 
 def _inner_guard(run: Run, out: str, what: str) -> None:
