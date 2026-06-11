@@ -1,45 +1,33 @@
-"""The arrow surface: typed dataflow fragments that compile to an engine System.
+"""Internal: Flow and the combinators, the operator algebra of the arrow surface.
 
-A Flow[A, B] is a fragment from an input of type A to an output of type B. Flows compose into
-whole systems: + is sequence, * is the binary parallel product, gather_all its n-ary form, branch
-routes to one case by a label, .loop iterates a state-preserving flow, nest runs a sub-system
-as one opaque node. The type parameters make each stitch checkable: a + b only type-checks when
-b accepts what a produces, so an unjoined parallel (a tuple the next stage must consume) becomes
-a type error, not a runtime footgun.
-
-This module is the algebra only. The leaves that fill it, action (code) and agent (a prompt
-over the LLM seam), live in atoms; the rule surface in blackboard. Composition is lazy: a
-Flow allocates fact tags and nodes only at .system(), so the same fragment can be reused and
-nested. An LLM backend bound at .system() / .run() becomes the default for every LLM node
-that did not bind its own; an unbound node fails there, at compile time, not mid-run.
-
-Where the algebra takes a predicate or a selector, it also takes a declarative form that a
-program can emit as data: .loop(until=) accepts a state key or a Condition next to a callable,
-and branch(select=) accepts a state key next to a callable or a label-producing flow (an
-agent with labels=).
-
-One event-wave caveat: a join (* or gather_all) reads the latest version of each source, and
-re-fires as soon as any source gains one. In a single-shot run that is exactly "fire once when
-all arrive", but under mid-run commits with branches of unequal length a join can emit a mixed
-pair (one branch's new value, the other's stale one) before the slower branch lands. Waves are
-not yet aligned per join; that needs an epoch notion the engine does not have.
+Flow and its combinator subclasses are mutually recursive (Flow methods build _Seq/_Par/
+_Loop, which subclass Flow), so they live together. Each combinator's _build compiles to
+nodes via the factories in _nodes.
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Generic, Literal, TypeVar
+from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
-from pydantic import BaseModel, model_validator
-
-from fedotmas.engine.contract import Fact, Node, Result, Status, View
+from fedotmas.engine.contract import Fact, Node, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.node import as_node
-from fedotmas.engine.report import Run, StepReport
+from fedotmas.engine.report import StepReport
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
 from fedotmas.engine.terminate import Budget, Goal, Terminate, any_of
+from fedotmas.sdk.flow._condition import Condition, _as_predicate, _pick
+from fedotmas.sdk.flow._nodes import (
+    _alias_node,
+    _collect_node,
+    _Ctx,
+    _gather_node,
+    _inner_guard,
+    _loop_finish_node,
+    _loop_iterate_node,
+)
+from fedotmas.sdk.flow._outcome import Outcome
 
 if TYPE_CHECKING:
     from fedotmas.engine.policy import Policy
@@ -49,174 +37,6 @@ if TYPE_CHECKING:
 A = TypeVar("A")
 B = TypeVar("B")
 C = TypeVar("C")
-
-
-def _pick(state: Any, key: str) -> Any:
-    if isinstance(state, dict):
-        return state.get(key)
-    return getattr(state, key, None)
-
-
-class Condition(BaseModel):
-    """A declarative predicate over one key of the state: data, not code, so a program that
-    emits systems can express a stop or routing condition without writing a callable. `key`
-    is looked up in the state (dict key or attribute, absent reads as None), `op` compares it
-    to `value`. The default op is truthy, so Condition(key="approved") means state["approved"].
-    """
-
-    key: str
-    op: Literal["truthy", "not", "eq", "ne", "gt", "lt", "gte", "lte", "exists"] = (
-        "truthy"
-    )
-    value: Any = None
-
-    @model_validator(mode="after")
-    def _value_matches_op(self) -> Condition:
-        if self.op in ("gt", "lt", "gte", "lte") and self.value is None:
-            raise ValueError(
-                f"Condition(key={self.key!r}, op={self.op!r}): an ordered comparison "
-                "needs value="
-            )
-        if self.op in ("truthy", "not", "exists") and self.value is not None:
-            raise ValueError(
-                f"Condition(key={self.key!r}, op={self.op!r}): {self.op} does not "
-                "compare, drop value="
-            )
-        return self
-
-    def check(self, state: Any) -> bool:
-        if self.op == "exists":
-            return (
-                self.key in state
-                if isinstance(state, dict)
-                else hasattr(state, self.key)
-            )
-        v = _pick(state, self.key)
-        if self.op == "truthy":
-            return bool(v)
-        if self.op == "not":
-            return not v
-        if self.op == "eq":
-            return v == self.value
-        if self.op == "ne":
-            return v != self.value
-        if v is None:
-            raise ValueError(
-                f"Condition(key={self.key!r}, op={self.op!r}): the state has no "
-                f"{self.key!r} to compare"
-            )
-        if self.op == "gt":
-            return v > self.value
-        if self.op == "lt":
-            return v < self.value
-        if self.op == "gte":
-            return v >= self.value
-        return v <= self.value
-
-
-def _as_predicate(
-    until: Callable[[Any], bool] | Condition | str,
-) -> Callable[[Any], bool]:
-    if isinstance(until, str):
-        until = Condition(key=until)
-    if isinstance(until, Condition):
-        return until.check
-    return until
-
-
-@dataclass
-class _Ctx:
-    llm: LLM | None = None
-    n: int = 0
-
-    def fresh(self, hint: str) -> str:
-        self.n += 1
-        return f"{hint}#{self.n}"
-
-
-def _gather_node(name: str, srcs: list[str], out: str) -> Node:
-    async def invoke(input: Any, view: View) -> Result:
-        value = tuple(view.value(s) for s in srcs)
-        return Result(writes=[Fact(tag=out, value=value)])
-
-    return as_node(invoke, name=name, reads=" ".join(srcs))
-
-
-def _collect_node(name: str, srcs: list[str], out: str) -> Node:
-    async def invoke(input: Any, view: View) -> Result:
-        return Result(writes=[Fact(tag=out, value=[view.value(s) for s in srcs])])
-
-    return as_node(invoke, name=name, reads=" ".join(srcs))
-
-
-def _alias_node(src: str, out: str, name: str | None = None) -> Node:
-    async def invoke(input: Any, view: View) -> Result:
-        return Result(writes=[Fact(tag=out, value=view.value(src))])
-
-    return as_node(invoke, name=name or f"alias:{out}", reads=src)
-
-
-def _inner_guard(run: Run, out: str, what: str) -> None:
-    """Surface an inner run's failure as this node's failure, so the outer engine records it
-    as an error fact instead of silently writing None."""
-    if run.status is Status.ERROR:
-        msgs = "; ".join(
-            f"{e.producer}: {e.value}" for s in run.steps for e in s.errors
-        )
-        raise RuntimeError(f"{what}: inner system failed ({msgs})")
-    if not run.view.exists(out):
-        raise RuntimeError(
-            f"{what}: inner system stopped ({run.reason}) before producing {out!r}"
-        )
-
-
-@dataclass
-class Outcome:
-    """The outcome of a run surface (Flow.run, Board.run): the engine Run plus the out tag,
-    read back as one object. `value` is the produced output (None if the run never reached
-    it), `ok` is "finished clean and produced the output", and `reason` says how the run
-    ended: "goal" (output produced), "error" (a node failed, see `errors`), "budget" (step
-    cap hit first), or "stalled" (the system went quiet without producing the output: a
-    wiring gap). Under halt_on_error=False a run can end reason "goal" with `errors`
-    non-empty; `ok` stays False, it never overlooks an error.
-    """
-
-    run: Run
-    out: str
-
-    @property
-    def view(self) -> View:
-        return self.run.view
-
-    @property
-    def steps(self) -> list[StepReport]:
-        return self.run.steps
-
-    @property
-    def value(self) -> Any:
-        return self.run.view.value(self.out)
-
-    @property
-    def errors(self) -> list[Fact]:
-        return [e for s in self.run.steps for e in s.errors]
-
-    @property
-    def ok(self) -> bool:
-        return self.run.status is Status.OK and self.run.view.exists(self.out)
-
-    @property
-    def reason(self) -> Literal["goal", "error", "budget", "stalled"]:
-        if self.run.reason == "error":
-            return "error"
-        if self.run.view.exists(self.out):
-            return "goal"
-        return "stalled" if self.run.reason == "quiescence" else "budget"
-
-    def __repr__(self) -> str:
-        value = repr(self.value)
-        if len(value) > 120:
-            value = value[:117] + "..."
-        return f"Outcome(ok={self.ok}, reason={self.reason!r}, value={value})"
 
 
 class Flow(Generic[A, B]):
@@ -352,58 +172,19 @@ class _Loop(Flow[Any, Any]):
 
     def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
         name = ctx.fresh("loop")
-        out = name
         state = f"{name}:s"
         body_in, body_out = f"{name}:in", f"{name}:out"
         body = self._body.system(entry=body_in, out=body_out, llm=ctx.llm)
-        until = self._until
         round_term: Terminate = Goal(lambda v: v.exists(body_out))
         if self._budget is not None:
             round_term = any_of(round_term, Budget(self._budget))
-
-        async def iterate(input: Any, view: View) -> Result:
-            seen = view.query(f"{state}:*")
-            src = seen[-1].value if seen else (view.value(entry) if entry else None)
-            inner = Store()
-            run = await ReactiveExecutor().run(
-                body,
-                inner,
-                seed=[Fact(tag=body_in, value=src)],
-                terminate=round_term,
-            )
-            _inner_guard(run, body_out, f"loop {name!r} round {len(seen) + 1}")
-            n = len(seen) + 1
-            return Result(
-                writes=[Fact(tag=f"{state}:{n}", value=run.view.value(body_out))]
-            )
-
-        def iterate_trigger(view: View) -> bool:
-            seen = view.query(f"{state}:*")
-            if not seen:
-                return view.exists(entry) if entry else True
-            return not until(seen[-1].value)
-
-        async def finish(input: Any, view: View) -> Result:
-            return Result(
-                writes=[Fact(tag=out, value=view.query(f"{state}:*")[-1].value)]
-            )
-
-        def finish_trigger(view: View) -> bool:
-            seen = view.query(f"{state}:*")
-            return bool(seen) and until(seen[-1].value) and not view.exists(out)
-
         nodes = [
-            as_node(
-                iterate,
-                name=f"{name}:iter",
-                reads=f"{state}:*",
-                trigger=iterate_trigger,
+            _loop_iterate_node(
+                name, body, body_in, body_out, entry, state, self._until, round_term
             ),
-            as_node(
-                finish, name=f"{name}:done", reads=f"{state}:*", trigger=finish_trigger
-            ),
+            _loop_finish_node(name, state, name, self._until),
         ]
-        return nodes, out
+        return nodes, name
 
 
 class _Branch(Flow[Any, Any]):

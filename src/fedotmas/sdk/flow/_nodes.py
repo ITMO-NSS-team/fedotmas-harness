@@ -1,0 +1,121 @@
+"""Internal: the compiled plumbing of the arrow surface.
+
+The compile context that allocates fresh fact tags, the node factories the combinators
+compile to (joins, aliases, the loop's iterate/finish pair), and the guard that surfaces an
+inner run's failure as the wrapping node's error.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+from fedotmas.engine.contract import Fact, Node, Result, Status, View
+from fedotmas.engine.executor import ReactiveExecutor
+from fedotmas.engine.node import as_node
+from fedotmas.engine.report import Run
+from fedotmas.engine.store import Store
+from fedotmas.engine.system import System
+from fedotmas.engine.terminate import Terminate
+
+if TYPE_CHECKING:
+    from fedotmas.sdk.atoms import LLM
+
+
+@dataclass
+class _Ctx:
+    llm: LLM | None = None
+    n: int = 0
+
+    def fresh(self, hint: str) -> str:
+        self.n += 1
+        return f"{hint}#{self.n}"
+
+
+def _gather_node(name: str, srcs: list[str], out: str) -> Node:
+    async def invoke(input: Any, view: View) -> Result:
+        value = tuple(view.value(s) for s in srcs)
+        return Result(writes=[Fact(tag=out, value=value)])
+
+    return as_node(invoke, name=name, reads=" ".join(srcs))
+
+
+def _collect_node(name: str, srcs: list[str], out: str) -> Node:
+    async def invoke(input: Any, view: View) -> Result:
+        return Result(writes=[Fact(tag=out, value=[view.value(s) for s in srcs])])
+
+    return as_node(invoke, name=name, reads=" ".join(srcs))
+
+
+def _alias_node(src: str, out: str, name: str | None = None) -> Node:
+    async def invoke(input: Any, view: View) -> Result:
+        return Result(writes=[Fact(tag=out, value=view.value(src))])
+
+    return as_node(invoke, name=name or f"alias:{out}", reads=src)
+
+
+def _inner_guard(run: Run, out: str, what: str) -> None:
+    """Surface an inner run's failure as this node's failure, so the outer engine records it
+    as an error fact instead of silently writing None."""
+    if run.status is Status.ERROR:
+        msgs = "; ".join(
+            f"{e.producer}: {e.value}" for s in run.steps for e in s.errors
+        )
+        raise RuntimeError(f"{what}: inner system failed ({msgs})")
+    if not run.view.exists(out):
+        raise RuntimeError(
+            f"{what}: inner system stopped ({run.reason}) before producing {out!r}"
+        )
+
+
+def _loop_iterate_node(
+    name: str,
+    body: System,
+    body_in: str,
+    body_out: str,
+    entry: str,
+    state: str,
+    until: Callable[[Any], bool],
+    round_term: Terminate,
+) -> Node:
+    """One round per firing: feed the latest state (the entry fact on round one) into the
+    body in a fresh inner store, write its output as the next state version. Re-arms while
+    `until` has not yet cleared on the latest state."""
+
+    async def invoke(input: Any, view: View) -> Result:
+        seen = view.query(f"{state}:*")
+        src = seen[-1].value if seen else (view.value(entry) if entry else None)
+        run = await ReactiveExecutor().run(
+            body, Store(), seed=[Fact(tag=body_in, value=src)], terminate=round_term
+        )
+        _inner_guard(run, body_out, f"loop {name!r} round {len(seen) + 1}")
+        return Result(
+            writes=[
+                Fact(tag=f"{state}:{len(seen) + 1}", value=run.view.value(body_out))
+            ]
+        )
+
+    def trigger(view: View) -> bool:
+        seen = view.query(f"{state}:*")
+        if not seen:
+            return view.exists(entry) if entry else True
+        return not until(seen[-1].value)
+
+    return as_node(invoke, name=f"{name}:iter", reads=f"{state}:*", trigger=trigger)
+
+
+def _loop_finish_node(
+    name: str, state: str, out: str, until: Callable[[Any], bool]
+) -> Node:
+    """Copy the final state version to the loop's output once `until` clears; fires once,
+    guarded by the output not existing yet."""
+
+    async def invoke(input: Any, view: View) -> Result:
+        return Result(writes=[Fact(tag=out, value=view.query(f"{state}:*")[-1].value)])
+
+    def trigger(view: View) -> bool:
+        seen = view.query(f"{state}:*")
+        return bool(seen) and until(seen[-1].value) and not view.exists(out)
+
+    return as_node(invoke, name=f"{name}:done", reads=f"{state}:*", trigger=trigger)

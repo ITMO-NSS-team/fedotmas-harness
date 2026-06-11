@@ -29,7 +29,8 @@ from pydantic import BaseModel
 from fedotmas.engine.contract import Fact, Node, Result, View
 from fedotmas.engine.node import as_node
 from fedotmas.sdk._template import render
-from fedotmas.sdk.flow import Flow, _Ctx
+from fedotmas.sdk.flow._algebra import Flow
+from fedotmas.sdk.flow._nodes import _Ctx
 
 A = TypeVar("A")
 B = TypeVar("B")

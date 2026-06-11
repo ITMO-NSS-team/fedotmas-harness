@@ -38,7 +38,7 @@ from fedotmas.engine.system import System
 from fedotmas.engine.terminate import Budget, Goal, Terminate
 from fedotmas.sdk._template import render
 from fedotmas.sdk.atoms import LLM
-from fedotmas.sdk.flow import Outcome
+from fedotmas.sdk.flow._outcome import Outcome
 
 StepFn = Callable[[Any, View], Awaitable[Any]]
 When = Callable[[View], bool]
