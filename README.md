@@ -18,5 +18,5 @@ Docs: [sdk](docs/sdk.md) (start here), [engine](docs/engine.md) (under the hood)
 Planned, not in the tree yet (placeholder packages removed until real):
 
 - v0.1 - `dsl`: the spec language and compiler, wrappers for other frameworks and any agents and converting to dsl. `meta-agent` - selection pattern of a MAS by provided task features
+- v0.2 - time across the run boundary, one contract in two parts: wave epochs for joins (fixes the pinned wave-skew limitation) and checkpoint-style resume/persistence (a resume seam on the executor plus a facts export; where the blobs live stays outside the framework)
 - v0.2 - `reliability`: retries, fallback, routing?
-- v0.2 - `memory`: runtime and persistence memory

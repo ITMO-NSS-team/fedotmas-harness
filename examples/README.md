@@ -48,7 +48,7 @@ emergent activation. Every file compiles to the same engine `System` and streams
 
 The SDK on real models via the optional `[llm]` extra. The `LLM` contract is the seam: any
 provider or framework wraps into it, and `adapters.pydantic_ai.PydanticAI` is the default
-backend, bound once at `.run()` / `blackboard()` rather than on every node. Four examples,
+backend, bound once at `.run()` / `blackboard()` rather than on every node. Five examples,
 chosen to be orthogonal: each exercises a different surface of the SDK, and together they
 cover all of it. Needs an OpenAI key in `.env`; run with the examples group, e.g.
 `uv run --group examples python examples/sdk-llm/dag.py`.
@@ -59,3 +59,4 @@ cover all of it. Needs an OpenAI key in `.env`; run with the examples group, e.g
 | Blackboard | `sdk-llm/blackboard.py` | declarative prompt rules (`rule(prompt=...)`), opportunistic `when` as a tag list, `input` template over store tags, `board.run` |
 | Master orchestrator | `sdk-llm/orchestrator.py` | structured plan sized at runtime, `action` as the code escape hatch for dynamic fan-out |
 | Handoff / Swarm | `sdk-llm/swarm.py` | stateful atoms end to end: `input=` templates, `merge=` structured handoff, `branch("station")` inside `.loop(until="done")` |
+| Mixed backends | `sdk-llm/backends.py` | the `LLM` seam itself: langchain wrapped inline beside the pydantic-ai default, `action` as the code body, one system |
