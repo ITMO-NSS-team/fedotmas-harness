@@ -97,8 +97,9 @@ class Fact(BaseModel):
 ```
 
 You set `tag` and `value`. The engine fills in `producer` (which agent wrote it) and `step`
-(which superstep) when the fact is committed, so you leave those alone. Seed facts are
-stamped `step=-1`, so a seed and a step-0 write under the same tag stay distinct facts.
+(which superstep) when the fact is committed; anything you set explicitly is kept. Seed
+facts land just before the store clock, `step=-1` on a fresh store, so a seed and a step-0
+write under the same tag stay distinct facts.
 
 Facts are never edited or deleted. To change something, you write a new fact. Tags are
 usually versioned for this reason: `draft:1`, then `draft:2`, and so on. The identity of a
@@ -111,7 +112,9 @@ agents writing the same tag in the same superstep count as two distinct facts, n
 
 The `Store` holds the facts. You almost never read from it directly. Instead the engine
 hands each agent a read-only `View`, which is a snapshot of the store frozen at the start of
-the current superstep.
+the current superstep. The store also owns the logical clock: `store.next_step()` is one
+past the highest step ever committed, monotonic across runs over the same store, so fact
+keys from a second run never collide with the first.
 
 ```python
 class View(Protocol):
@@ -160,9 +163,9 @@ class Node(Protocol):
 
 - `name` identifies the node and stamps every fact it writes.
 - `reads` is the pattern of facts this node consumes, or several patterns separated by
-  whitespace. The engine queries it to decide what to pass as `input` and to track what the
-  node has already seen: the matched facts are the node's re-fire identity (see
-  [Triggers](#triggers-and-the-fire-once-rule)).
+  whitespace. The engine queries it to decide what to pass as `input` (the matched facts, a
+  `list[Fact]`) and to track what the node has already seen: the matched facts are the
+  node's re-fire identity (see [Triggers](#triggers-and-the-fire-once-rule)).
 - `trigger(view)` returns `True` when the node wants to run, given the current snapshot.
 - `invoke(input, view)` does the work and returns a `Result`. It is `async`, so a node is
   free to call an LLM, hit the network, or just compute.
@@ -264,7 +267,8 @@ The reporting types:
 ```python
 @dataclass
 class StepReport:
-    step: int            # 0-based superstep index
+    step: int            # the store clock stamped on this step's writes
+    index: int           # 0-based position in this run's trace
     fired: list[str]     # names of agents that ran this step
     writes: list[Fact]   # facts they produced
     errors: list[Fact]   # error facts from agents that failed this step
@@ -276,6 +280,10 @@ class Run:
     view: View           # final snapshot
     reason: Literal["terminate", "quiescence", "error"]
 ```
+
+`step` and `index` coincide on a fresh store. They diverge when a run starts over a store
+with history: `step` keeps counting from the store clock, `index` from zero. `Budget` counts
+`index`, the run's own effort.
 
 `reason` says how the run ended: the terminate condition fired, the system went quiet on
 its own, or an agent failed. The three are different situations for whoever inspects the
@@ -296,7 +304,7 @@ Each iteration of the loop:
 6. Stamp their writes with the agent name and step, commit them in one batch together with
    error facts for any agent that failed, yield a `StepReport`.
 7. If any agent failed, stop (default; `halt_on_error=False` keeps going). Otherwise check
-   `terminate`. If done, stop. Otherwise increment the step and repeat.
+   `terminate`. If done, stop. Otherwise repeat.
 
 If no agent is ready, the system has gone quiet. The executor yields one final empty
 `StepReport` and stops on its own, even without a terminate condition.
@@ -333,9 +341,10 @@ A trigger is **level-based**: it returns `True` whenever the store currently sat
 condition. A naive loop would re-run an agent every superstep for as long as its condition
 held. The generator in a refinement loop would fire forever.
 
-The engine prevents this with a fire-once rule. It remembers, for each agent, the set of
-fact keys it has already consumed. An agent fires on a given input only once. Concretely the
-memo key is `(agent.name, frozenset(fact.key for fact in input_facts))`.
+The engine prevents this with a fire-once rule. For each agent it remembers the set of fact
+keys (`fact.key`) the agent last fired on, and the agent fires only when the facts matched
+by its `reads` differ from that set. The store is append-only, so a matched set only ever
+grows, and remembering the last one is enough to fire exactly once per distinct input.
 
 This is why versioned tags matter. When the critic reads `draft:1` and writes `verdict:1`,
 the generator's input is now a new fact set, so it is allowed to fire again and produce
@@ -546,5 +555,8 @@ Things to keep in mind:
   each other's writes until the next step.
 - Triggers are level-based, but the fire-once rule makes an agent run only once per distinct
   input fact set.
+- The store owns the step clock, so re-running over the same store gets fresh fact keys. A
+  fresh executor carries no fire-once memory, though: it re-fires every ready node over the
+  current state and recomputes.
 - Give parallel copies of an agent their own identity. They cannot count each other within a
   step.

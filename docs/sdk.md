@@ -26,9 +26,9 @@ nested inside a larger flow, because it bakes in no concrete tags until that mom
 
 So there are two languages in play. The arrow language is what you write, and it comes in three
 forms that follow the shape of each operation. Two binary combinators are infix operators, `+`
-(sequence) and `*` (parallel), with method aliases `.then` and `.par`. One transform is a method
-on a flow you already have, `.loop`. The rest build a flow from several flows or a whole system,
-so they are plain functions: `gather_all`, `branch`, `nest`. The dividing line is simple: you
+(sequence) and `*` (parallel). Transforms of a flow you already have are methods: `.loop`,
+`.into`, `.merge`. The rest build a flow from several flows or a whole system, so they are
+plain functions: `gather_all`, `branch`, `nest`. The dividing line is simple: you
 either do more to a flow you have (operator or method) or assemble a new one from parts
 (function). The fact-and-agent language is what it compiles to. Most of this page is the arrow
 language, with the compiled trace shown alongside so you can see the seam; the atoms that fill
@@ -130,7 +130,7 @@ engine's universal unit is the `Node`, and both atoms compile to nodes. Both ret
 `action` lifts a python function. The body is the behavior.
 
 ```python
-def action(fn: ActionFn[A, B]) -> Flow[A, B]: ...
+def action(fn: ActionFn[A, B], *, name: str | None = None) -> Flow[A, B]: ...
 ```
 
 The function has the signature `async (input: A, view: View) -> B`. The first argument is the
@@ -139,7 +139,8 @@ becomes the arrow's output. `view` is the read-only snapshot of the whole store,
 stage needs to look at something beyond its direct input, ignorable otherwise. The types on the
 signature are the types of the arrow, so write them honestly rather than reaching for `Any`:
 `research` above is a `Flow[str, str]`, and that annotation is what makes the composition
-checkable.
+checkable. `name` overrides the function's `__name__` in traces and error tags; pass it when
+lifting a lambda.
 
 ### agent
 
@@ -148,8 +149,7 @@ authored without hand-writing a model call.
 
 ```python
 def agent(
-    name, *, prompt, input=None, takes=str, returns=str,
-    labels=None, into=None, merge=False, llm=None,
+    name, *, prompt, input=None, takes=str, returns=str, labels=None, llm=None,
 ) -> Flow[A, B]: ...
 ```
 
@@ -180,17 +180,20 @@ model call rather than a function.
 
 A stateless chain passes one value forward, but a loop, a swarm, or a chat threads a *state*
 through every node: each node reads part of it, calls the model, and folds the reply back in.
-Three keyword arguments make that declarative, so the node stays strings and types rather
-than becoming a hand-written model call:
+The reading side is a keyword: `input`, a template for what the model sees, rendered over the
+node's input (dict keys or model fields by name, store tags as a fallback, `{input}` for the
+whole value; a typo fails the node with the missing key named). The writing side is
+composition, not a parameter. Two combinators on the flow thread a dict state past the step,
+and they work on any flow, an `action` or a nested system as much as an `agent`:
 
-- `input` is a template for what the model sees, rendered over the node's input: dict keys
-  or model fields by name, store tags as a fallback, `{input}` for the whole value. Without
-  it the input is passed through unchanged. A typo in a template fails the node with the
-  missing key named.
-- `into="key"` writes the reply under that key of a dict state and passes the rest through.
-- `merge=True` folds a structured reply's fields into the dict state (`returns` should be a
-  model). `into` and `merge` are mutually exclusive, and both make the node `Flow[dict, dict]`,
-  the state-preserving shape `.loop` wants.
+- `.into("key")` puts the flow's output under that key of the state and passes the rest
+  through.
+- `.merge()` folds a structured output's fields into the state (`returns` should be a
+  model). The output decides which keys change, which is what lets a handoff target ride
+  inside the reply.
+
+Both return `Flow[dict, dict]`, the state-preserving shape `.loop` wants; the flow under
+them takes the state, so declare `takes=dict`.
 
 ```python
 class Handoff(BaseModel):
@@ -201,14 +204,15 @@ triage = agent(
     "triage",
     prompt="You are front-line triage. Reply, and set station to who acts next.",
     input="{ticket}",        # the model sees the ticket, not the whole state dict
+    takes=dict,
     returns=Handoff,
-    merge=True,              # state | {"reply": ..., "station": ...}
-)
+).merge()                    # state | {"reply": ..., "station": ...}
 ```
 
 The model saw one field, the reply chose the next station, and the whole node is still data.
 When behavior genuinely needs code (a computation, a dynamic fan-out), `action` is the escape
-hatch; `into`/`merge`/`input` exist so state threading alone never forces you into it.
+hatch; the template and the state combinators exist so state threading alone never forces
+you into it.
 
 ### agent as a classifier: labels
 
@@ -234,9 +238,10 @@ The label set rides to the backend as a `Literal` in `returns`, so a structured 
 cannot produce anything outside it, and the reply is validated against `labels` regardless.
 The classifier runs first and writes its label, the router sends the original input to the
 chosen case, and exactly one case fires. A plain `Callable` selector still works and saves
-the extra step; reach for `labels` when the choice itself needs a model. It combines with
-`into` (the label lands in the state, e.g. a group-chat manager writing who speaks next) but
-not with `returns` or `merge`.
+the extra step; reach for `labels` when the choice itself needs a model. It does not combine
+with `returns` (the label set is the return type); to land the label in a dict state, e.g. a
+group-chat manager writing who speaks next, compose:
+`agent(..., labels=[...], takes=dict).into("speaker")`.
 
 ### LLM
 
@@ -274,8 +279,7 @@ def __add__(self, other: Flow[B, C]) -> Flow[A, C]: ...
 Read the type: a `Flow[A, B]` plus a `Flow[B, C]` is a `Flow[A, C]`. The middle type `B` has
 to line up, which is the entire safety claim. If you write `research + edit` where one yields
 a draft and the other expects something else, the checker rejects the `+` itself, at the line
-where you wrote it, before any run. `.then` is the spelled-out method behind the operator if
-you prefer words to symbols.
+where you wrote it, before any run.
 
 ## Parallel: `*`
 
@@ -440,15 +444,21 @@ output, which is how three cases can share one output tag without colliding.
 clears.
 
 ```python
-def loop(self: Flow[A, A], until: Callable[[A], bool] | Condition | str) -> Flow[A, A]: ...
+def loop(
+    self: Flow[A, A], until: Callable[[A], bool] | Condition | str,
+    *, budget: int | None = 100,
+) -> Flow[A, A]: ...
 ```
 
 `until` reads the state after each round: a callable, a state key (`.loop(until="done")`
 stops when `state["done"]` is truthy), or a `Condition`, the declarative comparison
 (`Condition(key="rounds_left", op="lte", value=0)`) for conditions a bare key cannot say; the
-ordered ops (`gt`/`lt`/`gte`/`lte`) require a `value=` and a present key, and complain by
-name otherwise. The key and Condition forms are data, which is what a program emitting a
-system can write.
+ordered ops (`gt`/`lt`/`gte`/`lte`) require a `value=` and a present key, the non-comparing
+ops (`truthy`/`not`/`exists`) reject a stray one, and both complain by name. The key and
+Condition forms are data, which is what a program emitting a system can write. Each round
+runs the body in its own inner store as one outer superstep, so the run's budget caps how
+many rounds happen, and `.loop`'s own `budget=` caps the supersteps inside one round
+(`None` lifts it).
 
 The signature has a sharp edge worth reading. The receiver is typed `self: Flow[A, A]`, an
 arrow whose input and output are the same type. You can only call `.loop` on a
@@ -518,14 +528,16 @@ is the blackboard surface, written with `rule` and `blackboard`, and it does not
 ```python
 def nest(
     target: System | Flow[A, B] | Board, *, entry: str, out: str,
-    until: Terminate | None = None,
+    until: Terminate | None = None, budget: int | None = 100,
 ) -> Flow[A, B]: ...
 ```
 
 It wraps a whole sub-system. At runtime the node spins up its own inner store, seeds it with
 the incoming value under `entry`, runs the sub-system to its goal (`until`, defaulting to "the
 `out` fact exists"), and writes that one result outward. The boundary is typed, the interior
-is opaque.
+is opaque. The inner run is one superstep of the outer system, so the outer budget cannot
+interrupt it; `budget` caps the inner supersteps instead (`None` lifts it). An inner failure
+halts the inner run and surfaces as this node's error fact.
 
 ```python
 from fedotmas.sdk import Flow, Rule, action, blackboard, nest
@@ -705,15 +717,16 @@ the seam between them.
 |------------------------------|--------------------------------------------------------------|
 | `sdk.Flow`                   | the typed arrow `Flow[A, B]`, a lazy dataflow fragment        |
 | `sdk.action`                 | wrap a typed async function as a mechanical atom              |
-| `sdk.agent`                  | lift a prompt into an LLM atom; `input` template, `labels` classifier, `into`/`merge` for dict state |
+| `sdk.agent`                  | lift a prompt into an LLM atom; `input` template, `labels` classifier |
 | `sdk.LLM`                    | the LLM seam, one async `complete(prompt, input, view, returns)` |
 | `sdk.Condition`              | a declarative predicate over one state key, for `.loop` (data, not code) |
-| `Flow.__add__` / `.then`     | sequence, `Flow[A, B] + Flow[B, C] -> Flow[A, C]`             |
-| `Flow.__mul__` / `.par`      | parallel product, `-> Flow[A, tuple[B, C]]`                   |
+| `Flow.__add__` (`+`)         | sequence, `Flow[A, B] + Flow[B, C] -> Flow[A, C]`             |
+| `Flow.__mul__` (`*`)         | parallel product, `-> Flow[A, tuple[B, C]]`                   |
 | `sdk.gather_all`             | n-ary parallel, `*Flow[A, B] -> Flow[A, list[B]]`            |
 | `sdk.branch`                 | route to one case by a label: callable, state key, or a labels agent |
-| `Flow.loop`                  | iterate a state-preserving flow until a callable, state key, or `Condition` clears |
-| `sdk.nest`                   | run a whole sub-system (`Board`, `System`, or `Flow`) as one typed node |
+| `Flow.loop`                  | iterate a state-preserving flow until a callable, state key, or `Condition` clears; `budget=` caps one round |
+| `Flow.into` / `Flow.merge`   | thread a dict state past a step: output under one key / structured output folded in |
+| `sdk.nest`                   | run a whole sub-system (`Board`, `System`, or `Flow`) as one typed node; `budget=` caps its inner run |
 | `Flow.system`                | compile to a runnable `System`, given `entry`/`out` tags and a default `llm` |
 | `Flow.run` / `Flow.stream`   | compile and execute on one input; returns `Outcome` / yields `StepReport` |
 | `sdk.Outcome`                | the outcome: `.value`, `.ok`, `.reason`, `.errors`, `.steps` |
@@ -733,8 +746,8 @@ Things to keep in mind:
 - An atom is a function (`action`) or a prompt over an `LLM` (`agent`; agent always means
   LLM-backed). Both are the same `Flow` and compose alike, and the SDK never imports an LLM
   provider.
-- State threading is declarative: `input` templates pick what the model sees, `into`/`merge`
-  fold the reply back into a dict state, branch routes by a state key, loop stops on one.
+- State threading is declarative: `input` templates pick what the model sees, `.into`/`.merge`
+  fold the output back into a dict state, branch routes by a state key, loop stops on one.
   Reach for `action` only when behavior is genuinely code.
 - Failure is data. `Outcome.reason` distinguishes goal, error, budget, and stalled; `errors`
   names the failed node and its message, with the traceback in the fact's `meta`.
