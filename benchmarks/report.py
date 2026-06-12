@@ -19,8 +19,9 @@ OUT = Path(__file__).parent / "out"
 
 
 def load(bench: str, model: str) -> dict[str, dict]:
+    slug = model.replace(":", "-").replace("/", "-")
     records = {}
-    for path in sorted(OUT.glob(f"{bench}-*-{model}.json")):
+    for path in sorted(OUT.glob(f"{bench}-*-{slug}.json")):
         record = json.loads(path.read_text())
         records[record["pattern"]] = record
     return records
@@ -36,8 +37,10 @@ def _tokens(record: dict) -> float | None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--bench", default="gsm8k")
-    parser.add_argument("--model", default="gpt-4o-mini")
+    parser.add_argument("--model", default="gpt-oss-20b")
     parser.add_argument("--selector", action="store_true")
+    # the selector is part of our system: one fixed model across all benchmark models
+    parser.add_argument("--selector-model", default="openai-responses:gpt-4o-mini")
     args = parser.parse_args()
 
     records = load(args.bench, args.model)
@@ -79,7 +82,7 @@ def main() -> None:
     rows.append(("oracle per-task", per_task, None, None))
 
     if args.selector:
-        rows.append(selector_row(tasks, correct, calls, tokens, args.model))
+        rows.append(selector_row(tasks, correct, calls, tokens, args.selector_model))
 
     print(f"\n{args.bench} / {args.model}, n={len(tasks)}\n")
     print(f"{'configuration':>28}  {'acc':>5}  {'calls/task':>10}  {'tok/task':>9}")
@@ -101,7 +104,7 @@ def selector_row(
     from fedotmas_meta.selector import select
 
     load_dotenv(Path(__file__).parents[1] / ".env")
-    llm = PydanticAI(f"openai-responses:{model}")
+    llm = PydanticAI(model)
     # the menu narrows to recorded patterns, so every pick can be looked up
     pool = [get(p) for p in correct]
 

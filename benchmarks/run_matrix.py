@@ -1,6 +1,8 @@
 """Run the pattern x benchmark matrix; one JSON record file per configuration.
 
-A benchmark is a folder exposing suite(n, seed) and FILLS (see gsm8k/). Usage:
+A benchmark is a folder exposing suite(n, seed) and FILLS (see gsm8k/). The model is
+a full pydantic-ai spec: openai-responses:gpt-4o-mini, openrouter:qwen/qwen3-30b, ...
+Usage:
 uv run --group examples --group bench python benchmarks/run_matrix.py \
     --bench gsm8k --n 5 --patterns single,chain
 """
@@ -26,9 +28,13 @@ from model import FlowModel  # noqa: E402
 OUT = Path(__file__).parent / "out"
 
 
+def slug(model: str) -> str:
+    return model.replace(":", "-").replace("/", "-")
+
+
 def run_one(pattern: str, domain: ModuleType, args: argparse.Namespace) -> str:
     flow = get(pattern).build(domain.FILLS[pattern])
-    backend = PydanticAI(f"openai-responses:{args.model}")
+    backend = PydanticAI(args.model)
     config = FlowModel(f"{pattern}/{args.model}", flow, backend)
     suite = domain.suite(args.n, args.seed)
     started = time.time()
@@ -45,7 +51,7 @@ def run_one(pattern: str, domain: ModuleType, args: argparse.Namespace) -> str:
         "seconds": round(time.time() - started, 1),
         "items": suite.predictions.to_dict("records"),
     }
-    path = OUT / f"{args.bench}-{pattern}-{args.model}.json"
+    path = OUT / f"{args.bench}-{pattern}-{slug(args.model)}.json"
     path.write_text(json.dumps(record, ensure_ascii=False, indent=1, default=str))
     return (
         f"{pattern:>14}: score {suite.overall_score:.2f}, "
@@ -58,7 +64,7 @@ def main() -> None:
     parser.add_argument("--bench", default="gsm8k")
     parser.add_argument("--n", type=int, default=5)
     parser.add_argument("--patterns", default="single")
-    parser.add_argument("--model", default="gpt-4o-mini")
+    parser.add_argument("--model", default="openrouter:openai/gpt-oss-20b")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--jobs", type=int, default=1)
     args = parser.parse_args()
