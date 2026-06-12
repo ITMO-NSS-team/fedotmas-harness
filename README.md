@@ -1,6 +1,16 @@
-# fedotmas
+<div align="center">
 
-Agent systems generation and harness: a tiny orchestration engine plus a typed SDK on top.
+# `FEDOT.MAS`
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776ab.svg)](https://python.org)
+
+</div>
+
+> [!WARNING]
+> Early development (v0.1). The API will change between versions.
+
+An agent-SDK-agnostic framework for building multi-agent systems: a tiny orchestration engine, a typed SDK on top, and a JSON manifest language so systems can be written as data.
 
 ```python
 from fedotmas.sdk import agent
@@ -13,11 +23,45 @@ run = await (outline + draft).run("heralt of rivia", llm=PydanticAI("openai-resp
 print(run.value)
 ```
 
-Docs: [sdk](docs/sdk.md) (start here), [engine](docs/engine.md) (under the hood). Examples: [examples/](examples/README.md).
+LLM and plain code are the same kind of node:
 
-Planned, not in the tree yet (placeholder packages removed until real):
+```python
+from fedotmas.sdk import action, agent
 
-- v0.1 - `dsl`: the spec language and compiler, wrappers for other frameworks and any agents and converting to dsl
-- `meta` - the meta-agent: an application built on the SDK itself (designer -> wirer -> compile loop, the compiler as a deterministic critic). Generate / select / combine MAS as one synthesis spectrum over the spec: M0 generate a system from a task, M1 pattern library (the MAS patterns as spec templates, not DSL primitives), M2 select among cataloged systems by task description, M3 combine systems via spec-as-node composition. Grows as assets (templates, catalog, prompts), not engine features; engine/sdk/dsl never depend on it
-- v0.2 - time across the run boundary, one contract in two parts: wave epochs for joins (fixes the pinned wave-skew limitation) and checkpoint-style resume/persistence (a resume seam on the executor plus a facts export; where the blobs live stays outside the framework)
-- v0.2 - `reliability`: retries, fallback, routing?
+@action
+async def count(text: str, view) -> dict:
+    return {"text": text, "words": len(text.split())}
+
+flow = agent("summarize", prompt="Summarize in one sentence.") + count
+```
+
+Any agent SDK binds the same way: the `LLM` seam is a single method, see [backends.py](examples/sdk-llm/backends.py).
+
+The same system as a document:
+
+```python
+from fedotmas import dsl
+
+flow = dsl.compile(dsl.parse("""{
+  "version": 1,
+  "nodes": {"outline": "Give a 3-bullet outline for the topic.",
+            "draft": "Write one vivid paragraph from the outline."},
+  "flow": ["outline", "draft"]
+}"""))
+```
+
+## Packages
+
+A uv workspace, everything publishable lives in `packages/`:
+
+- [`fedotmas`](packages/fedotmas): the core engine, sdk, dsl, adapters
+- [`fedotmas-meta`](packages/fedotmas-meta): the meta-agent that builds systems from task descriptions; early
+
+Docs: [sdk](docs/sdk.md) (start here), [engine](docs/engine.md). Examples: [examples/](examples/README.md).
+
+## Planned
+
+- meta-agent M0: match a task to a pattern family, fill the roles, compile; the compiler acts as a deterministic critic
+- v0.2: wave epochs for joins, checkpoint-style resume/persistence
+- reliability: a middleware seam plus retry/fallback combinators
+- richer runtime memory (knowledge graphs) behind a store port
