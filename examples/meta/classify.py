@@ -1,22 +1,14 @@
-"""Zero-shot probe: can a prompted LLM pick a MAS pattern for a task?"""
+"""Zero-shot probe: can a prompted LLM pick a MAS pattern for a task?
+
+The menu comes from the preset catalog; the pick goes through fedotmas_meta.selector.
+"""
 
 import asyncio
 from collections import Counter
 
 from dotenv import load_dotenv
-from fedotmas import sdk
 from fedotmas.adapters.pydantic_ai import PydanticAI
-
-PATTERNS = {
-    "single": "one agent answers directly; the task is small and self-contained",
-    "chain": "fixed pipeline of specialized steps, each consuming the previous output",
-    "debate": "parallel agents argue or vote; contested judgement or error-prone reasoning",
-    "eval_optimizer": "generator improves a draft in a loop until a critic approves",
-    "orchestrator": "a planner splits the task into runtime-sized subtasks done in parallel",
-    "router": "incoming items are dispatched to one of several specialist handlers",
-}
-
-MENU = "\n".join(f"- {name}: {hint}" for name, hint in PATTERNS.items())
+from fedotmas_meta.selector import select
 
 TASKS = [
     ("What is the capital of Australia?", "single"),
@@ -61,18 +53,17 @@ TASKS = [
         "Classify each user message as a complaint, a feature request, or praise, and respond accordingly.",
         "router",
     ),
+    (
+        "Diagnose this production incident from logs, metrics, and deploy history: any of them may hold the clue, and each finding can reopen the others.",
+        "blackboard",
+    ),
+    (
+        "Assemble a due-diligence picture of a startup where claims from filings, press, and interviews must cross-check each other until the story is consistent.",
+        "blackboard",
+    ),
 ]
 
 REPEATS = 3
-
-select = sdk.agent(
-    "select",
-    prompt=(
-        "You design multi-agent systems. Pick the execution pattern that best fits the"
-        f" task you are given. Patterns:\n{MENU}"
-    ),
-    labels=list(PATTERNS),
-)
 
 
 async def main() -> None:
@@ -80,10 +71,8 @@ async def main() -> None:
     llm = PydanticAI("openai-responses:gpt-4o-mini")
     hits = 0
     for task, expected in TASKS:
-        runs = await asyncio.gather(
-            *(select.run(task, llm=llm) for _ in range(REPEATS))
-        )
-        votes = Counter(r.value for r in runs)
+        runs = await asyncio.gather(*(select(task, llm=llm) for _ in range(REPEATS)))
+        votes = Counter(r.pattern for r in runs)
         picked, _ = votes.most_common(1)[0]
         hit = picked == expected
         hits += hit
