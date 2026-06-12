@@ -47,6 +47,8 @@ def run_one(pattern: str, domain: ModuleType, args: argparse.Namespace) -> str:
         "seed": args.seed,
         "overall": suite.overall_score,
         "llm_calls": config.llm.calls,
+        "failures": config.failures,
+        "errors": config.errors[:5],
         "usage": backend.usage,
         "seconds": round(time.time() - started, 1),
         "items": suite.predictions.to_dict("records"),

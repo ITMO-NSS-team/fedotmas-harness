@@ -45,6 +45,8 @@ class FlowModel(DeepEvalBaseLLM):
         self.label = name
         self.flow = flow
         self.llm = CountingLLM(llm)
+        self.failures = 0
+        self.errors: list[str] = []
 
     def load_model(self) -> Any:
         return self.flow
@@ -52,7 +54,10 @@ class FlowModel(DeepEvalBaseLLM):
     async def a_generate(self, prompt: str) -> str:
         run = await self.flow.run(prompt, llm=self.llm)
         if not run.ok:
-            return f"<failed: {run.reason}>"
+            self.failures += 1
+            detail = str(run.errors[0].value) if run.errors else run.reason
+            self.errors.append(detail)
+            return f"<failed: {detail}>"
         return str(run.value)
 
     def generate(self, prompt: str, schema: Any = None) -> Any:
@@ -72,7 +77,10 @@ class FlowModel(DeepEvalBaseLLM):
             else:
                 raise TypeError(f"unsupported schema {schema.__name__}")
         text = asyncio.run(self.a_generate(prompt))
-        return text if extract is None else schema(answer=extract(text))
+        if extract is None:
+            return text
+        # error text may contain digits or letters; never mine an answer out of it
+        return schema(answer=extract("" if text.startswith("<failed") else text))
 
     def batch_generate(self, prompts: list[str]) -> list[str]:
         async def all_of() -> list[str]:
