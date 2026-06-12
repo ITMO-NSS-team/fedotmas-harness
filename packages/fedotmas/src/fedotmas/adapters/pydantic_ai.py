@@ -1,12 +1,6 @@
-"""pydantic-ai as the default LLM backend, wrapped into the LLM seam.
+"""pydantic-ai as the default LLM backend, wrapped into the LLM protocol.
 
-A PydanticAI holds a provider model handle. complete builds a pydantic-ai Agent with the
-node's prompt as system prompt and returns as output_type, so a typed agent atom gets
-structured output for free: the boundary stays typed all the way to the model. Agents are
-cached by (prompt, returns), which are constant per node, so the model is resolved once
-rather than on every call. The core never imports this module; it is one concrete
-implementation of the seam, gated by the llm extra (pip install fedotmas[llm]). Wrap any
-other framework the same way to swap it out.
+Gated by the llm extra (pip install fedotmas[llm]).
 """
 
 from __future__ import annotations
@@ -28,11 +22,15 @@ def _as_text(input: Any) -> str:
     return json.dumps(input, ensure_ascii=False, default=str)
 
 
+_METERS = ("input_tokens", "output_tokens", "requests")
+
+
 class PydanticAI:
     def __init__(self, model: str, **settings: Any) -> None:
         self._model = model
         self._settings = settings
         self._agents: dict[tuple[str, Any], Agent] = {}
+        self.usage: dict[str, int] = dict.fromkeys(_METERS, 0)
 
     async def complete(
         self, prompt: str, input: Any, view: View, returns: Any = str
@@ -44,4 +42,7 @@ class PydanticAI:
             )
             self._agents[(prompt, returns)] = agent
         result = await agent.run(_as_text(input))
+        used = result.usage
+        for key in _METERS:
+            self.usage[key] = self.usage.get(key, 0) + (getattr(used, key) or 0)
         return result.output

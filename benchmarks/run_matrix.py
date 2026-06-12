@@ -54,11 +54,8 @@ def main() -> None:
 
     for pattern in args.patterns.split(","):
         flow = get(pattern).build(FILLS[args.bench][pattern])
-        config = FlowModel(
-            f"{pattern}/{args.model}",
-            flow,
-            PydanticAI(f"openai-responses:{args.model}"),
-        )
+        backend = PydanticAI(f"openai-responses:{args.model}")
+        config = FlowModel(f"{pattern}/{args.model}", flow, backend)
         suite = bench(args.bench, args.n, args.seed)
         started = time.time()
         suite.evaluate(model=config)
@@ -70,6 +67,7 @@ def main() -> None:
             "seed": args.seed,
             "overall": suite.overall_score,
             "llm_calls": config.llm.calls,
+            "usage": backend.usage,
             "seconds": round(time.time() - started, 1),
             "items": suite.predictions.to_dict("records"),
         }

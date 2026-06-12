@@ -26,6 +26,13 @@ def load(bench: str, model: str) -> dict[str, dict]:
     return records
 
 
+def _tokens(record: dict) -> float | None:
+    usage = record.get("usage")
+    if not usage:
+        return None
+    return (usage["input_tokens"] + usage["output_tokens"]) / record["n"]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--bench", default="gsm8k")
@@ -36,6 +43,11 @@ def main() -> None:
     records = load(args.bench, args.model)
     if not records:
         raise SystemExit(f"no records for {args.bench}/{args.model} in {OUT}")
+    subsamples = {(r["n"], r.get("seed")) for r in records.values()}
+    if len(subsamples) > 1:
+        raise SystemExit(
+            f"records disagree on (n, seed): {sorted(subsamples)}; rerun the matrix"
+        )
 
     # correctness per pattern keyed by task text; tasks aligned across patterns by seed
     correct = {
@@ -44,39 +56,46 @@ def main() -> None:
     }
     tasks = list(next(iter(correct.values())))
     calls = {p: r["llm_calls"] / r["n"] for p, r in records.items()}
+    tokens = {p: _tokens(r) for p, r in records.items()}
 
-    rows: list[tuple[str, float, float | None]] = []
+    rows: list[tuple[str, float, float | None, float | None]] = []
     for p, r in records.items():
-        rows.append((p, r["overall"], calls[p]))
+        rows.append((p, r["overall"], calls[p], tokens[p]))
 
+    known = [t for t in tokens.values() if t is not None]
     mean_calls = sum(calls.values()) / len(calls)
+    mean_tokens = sum(known) / len(known) if len(known) == len(tokens) else None
     random_acc = sum(
         sum(c[t] for c in correct.values()) / len(correct) for t in tasks
     ) / len(tasks)
-    rows.append(("random (expected)", random_acc, mean_calls))
+    rows.append(("random (expected)", random_acc, mean_calls, mean_tokens))
 
     best_fixed = max(records, key=lambda p: records[p]["overall"])
-    rows.append((f"oracle fixed = {best_fixed}", records[best_fixed]["overall"], None))
+    rows.append(
+        (f"oracle fixed = {best_fixed}", records[best_fixed]["overall"], None, None)
+    )
 
     per_task = sum(max(c[t] for c in correct.values()) for t in tasks) / len(tasks)
-    rows.append(("oracle per-task", per_task, None))
+    rows.append(("oracle per-task", per_task, None, None))
 
     if args.selector:
-        rows.append(selector_row(tasks, correct, calls, args.model))
+        rows.append(selector_row(tasks, correct, calls, tokens, args.model))
 
     print(f"\n{args.bench} / {args.model}, n={len(tasks)}\n")
-    print(f"{'configuration':>28}  {'acc':>5}  {'calls/task':>10}")
-    for name, acc, cost in rows:
-        cell = f"{cost:10.1f}" if cost is not None else " " * 10
-        print(f"{name:>28}  {acc:5.2f}  {cell}")
+    print(f"{'configuration':>28}  {'acc':>5}  {'calls/task':>10}  {'tok/task':>9}")
+    for name, acc, n_calls, n_tokens in rows:
+        calls_cell = f"{n_calls:10.1f}" if n_calls is not None else " " * 10
+        tok_cell = f"{n_tokens:9.0f}" if n_tokens is not None else " " * 9
+        print(f"{name:>28}  {acc:5.2f}  {calls_cell}  {tok_cell}")
 
 
 def selector_row(
     tasks: list[str],
     correct: dict[str, dict[str, int]],
     calls: dict[str, float],
+    tokens: dict[str, float | None],
     model: str,
-) -> tuple[str, float, float]:
+) -> tuple[str, float, float, float | None]:
     from fedotmas.adapters.pydantic_ai import PydanticAI
     from fedotmas_meta.selector import select
 
@@ -91,7 +110,16 @@ def selector_row(
     print(f"selector picks: {dict(Counter(picks))}")
     acc = sum(correct[p][t] for p, t in zip(picks, tasks)) / len(tasks)
     cost = sum(calls[p] for p in picks) / len(tasks) + 1  # +1 for the selection call
-    return ("selector (per-task)", acc, cost)
+    picked_tokens = [tokens[p] for p in picks]
+    select_tokens = (llm.usage["input_tokens"] + llm.usage["output_tokens"]) / len(
+        tasks
+    )
+    tok = (
+        sum(t for t in picked_tokens if t is not None) / len(tasks) + select_tokens
+        if all(t is not None for t in picked_tokens)
+        else None
+    )
+    return ("selector (per-task)", acc, cost, tok)
 
 
 if __name__ == "__main__":
