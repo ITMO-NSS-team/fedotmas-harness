@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import re
-from typing import Any
+from functools import partial
+from typing import Any, get_args
 
 from deepeval.models import DeepEvalBaseLLM
 from fedotmas.sdk import LLM, Flow
@@ -15,6 +16,12 @@ _NUM = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
 def _last_int(text: str) -> int:
     hits = _NUM.findall(text)
     return int(float(hits[-1].replace(",", ""))) if hits else 0
+
+
+def _last_option(text: str, options: tuple[str, ...]) -> str:
+    pattern = "|".join(re.escape(o) for o in options)
+    hits = re.findall(rf"\b({pattern})\b", text)
+    return hits[-1] if hits else options[0]
 
 
 class CountingLLM:
@@ -49,14 +56,23 @@ class FlowModel(DeepEvalBaseLLM):
         return str(run.value)
 
     def generate(self, prompt: str, schema: Any = None) -> Any:
-        """Numeric answer schemas are extracted from the flow's free-form output; for any
-        other schema raise, so deepeval falls back to its confinement instructions."""
+        """Answer schemas are extracted from the flow's free-form output: the last number
+        for int answers, the last standalone option for Literal[str, ...] choices. Any
+        other schema raises BEFORE the flow runs, so deepeval falls back to its
+        confinement instructions without spending llm calls."""
+        extract = None
         if schema is not None:
             field = schema.model_fields.get("answer")
-            if field is None or field.annotation is not int:
+            annotation = field.annotation if field is not None else None
+            options = get_args(annotation)
+            if annotation is int:
+                extract = _last_int
+            elif options and all(isinstance(o, str) for o in options):
+                extract = partial(_last_option, options=options)
+            else:
                 raise TypeError(f"unsupported schema {schema.__name__}")
         text = asyncio.run(self.a_generate(prompt))
-        return text if schema is None else schema(answer=_last_int(text))
+        return text if extract is None else schema(answer=extract(text))
 
     def batch_generate(self, prompts: list[str]) -> list[str]:
         async def all_of() -> list[str]:
