@@ -5,7 +5,7 @@ requires = [ "uv-build>=0.9.21,<0.10" ]
 [project]
 name = "fedotmas"
 version = "0.1.0"
-description = "Agent Systems Generation and Harness"
+description = "A Framework for Building Multi-Agent Systems"
 readme = "README.md"
 authors = [ { name = "Dmitry Gilemkhanov", email = "me@dmitryglhf.ru" } ]
 requires-python = ">=3.11"

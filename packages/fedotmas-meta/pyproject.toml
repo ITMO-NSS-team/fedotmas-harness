@@ -5,7 +5,7 @@ requires = [ "uv-build>=0.9.21,<0.10" ]
 [project]
 name = "fedotmas-meta"
 version = "0.1.0"
-description = "Meta-agent over fedotmas: synthesize agent systems from tasks"
+description = "Task-Based Synthesis of Agent Systems"
 readme = "README.md"
 authors = [ { name = "Dmitry Gilemkhanov", email = "me@dmitryglhf.ru" } ]
 requires-python = ">=3.11"
