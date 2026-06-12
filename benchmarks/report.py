@@ -97,13 +97,16 @@ def selector_row(
     model: str,
 ) -> tuple[str, float, float, float | None]:
     from fedotmas.adapters.pydantic_ai import PydanticAI
+    from fedotmas_meta.presets import get
     from fedotmas_meta.selector import select
 
     load_dotenv(Path(__file__).parents[1] / ".env")
     llm = PydanticAI(f"openai-responses:{model}")
+    # the menu narrows to recorded patterns, so every pick can be looked up
+    pool = [get(p) for p in correct]
 
     async def pick_all() -> list[str]:
-        picks = await asyncio.gather(*(select(t, llm=llm) for t in tasks))
+        picks = await asyncio.gather(*(select(t, llm=llm, presets=pool) for t in tasks))
         return [p.pattern for p in picks]
 
     picks = asyncio.run(pick_all())

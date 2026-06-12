@@ -1,51 +1,36 @@
 """Run the pattern x benchmark matrix; one JSON record file per configuration.
 
-Usage: uv run --group examples --group bench python benchmarks/run_matrix.py \
+A benchmark is a folder exposing suite(n, seed) and FILLS (see gsm8k/). Usage:
+uv run --group examples --group bench python benchmarks/run_matrix.py \
     --bench gsm8k --n 5 --patterns single,chain
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any
+from types import ModuleType
 
 os.environ.setdefault("DEEPEVAL_TELEMETRY_OPT_OUT", "YES")
 
 from dotenv import load_dotenv  # noqa: E402
 from fedotmas.adapters.pydantic_ai import PydanticAI  # noqa: E402
 from fedotmas_meta.presets import get  # noqa: E402
-from fills import FILLS  # noqa: E402
 from model import FlowModel  # noqa: E402
 
 OUT = Path(__file__).parent / "out"
 
 
-def bench(name: str, n: int, seed: int):
-    """A benchmark over a seeded random subsample of its test split, never a prefix."""
-    if name == "gsm8k":
-        from datasets import load_dataset
-        from deepeval.benchmarks import GSM8K
-
-        suite = GSM8K(n_problems=n, n_shots=0, enable_cot=False)
-        data: Any = load_dataset("gsm8k", "main")
-        suite.dataset = {
-            "train": data["train"],
-            "test": data["test"].shuffle(seed=seed),
-        }
-        return suite
-    raise ValueError(f"unknown benchmark {name!r}")
-
-
-def run_one(pattern: str, args: argparse.Namespace) -> str:
-    flow = get(pattern).build(FILLS[args.bench][pattern])
+def run_one(pattern: str, domain: ModuleType, args: argparse.Namespace) -> str:
+    flow = get(pattern).build(domain.FILLS[pattern])
     backend = PydanticAI(f"openai-responses:{args.model}")
     config = FlowModel(f"{pattern}/{args.model}", flow, backend)
-    suite = bench(args.bench, args.n, args.seed)
+    suite = domain.suite(args.n, args.seed)
     started = time.time()
     suite.evaluate(model=config)
     record = {
@@ -80,15 +65,16 @@ def main() -> None:
 
     load_dotenv(Path(__file__).parents[1] / ".env")
     OUT.mkdir(exist_ok=True)
+    domain = importlib.import_module(args.bench)
     patterns = args.patterns.split(",")
 
     if args.jobs == 1:
         for pattern in patterns:
-            print(run_one(pattern, args))
+            print(run_one(pattern, domain, args))
         return
-    bench(args.bench, args.n, args.seed)  # warm the dataset cache once, not per thread
+    domain.suite(args.n, args.seed)  # warm the dataset cache once, not per thread
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        futures = {pool.submit(run_one, p, args): p for p in patterns}
+        futures = {pool.submit(run_one, p, domain, args): p for p in patterns}
         for done in as_completed(futures):
             print(done.result())
 
