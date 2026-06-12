@@ -1,0 +1,26 @@
+[build-system]
+build-backend = "uv_build"
+requires = [ "uv-build>=0.9.21,<0.10" ]
+
+[project]
+name = "fedotmas"
+version = "0.1.0"
+description = "Agent Systems Generation and Harness"
+readme = "README.md"
+authors = [ { name = "Dmitry Gilemkhanov", email = "me@dmitryglhf.ru" } ]
+requires-python = ">=3.11"
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+  "pydantic>=2.13.4",
+  "typing-extensions>=4.15",
+]
+optional-dependencies.llm = [
+  "pydantic-ai-slim[openai]>=1.106",
+  "python-dotenv>=1.2.2",
+]
