@@ -52,12 +52,8 @@ flow = dsl.compile(dsl.parse("""{
 
 ## Packages
 
-A uv workspace, everything publishable lives in `packages/`:
-
 - [`fedotmas`](packages/fedotmas): the core engine, sdk, dsl, adapters
 - [`fedotmas-meta`](packages/fedotmas-meta): the meta-agent that builds systems from task descriptions; early
-
-Docs: [sdk](docs/sdk.md) (start here), [engine](docs/engine.md). Examples: [examples/](examples/README.md).
 
 ## Planned
 
