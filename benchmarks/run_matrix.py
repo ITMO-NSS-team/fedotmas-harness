@@ -11,6 +11,7 @@ import json
 import os
 import time
 from pathlib import Path
+from typing import Any
 
 os.environ.setdefault("DEEPEVAL_TELEMETRY_OPT_OUT", "YES")
 
@@ -23,11 +24,19 @@ from model import FlowModel  # noqa: E402
 OUT = Path(__file__).parent / "out"
 
 
-def bench(name: str, n: int):
+def bench(name: str, n: int, seed: int):
+    """A benchmark over a seeded random subsample of its test split, never a prefix."""
     if name == "gsm8k":
+        from datasets import load_dataset
         from deepeval.benchmarks import GSM8K
 
-        return GSM8K(n_problems=n, n_shots=0, enable_cot=False)
+        suite = GSM8K(n_problems=n, n_shots=0, enable_cot=False)
+        data: Any = load_dataset("gsm8k", "main")
+        suite.dataset = {
+            "train": data["train"],
+            "test": data["test"].shuffle(seed=seed),
+        }
+        return suite
     raise ValueError(f"unknown benchmark {name!r}")
 
 
@@ -37,6 +46,7 @@ def main() -> None:
     parser.add_argument("--n", type=int, default=5)
     parser.add_argument("--patterns", default="single")
     parser.add_argument("--model", default="gpt-4o-mini")
+    parser.add_argument("--seed", type=int, default=7)
     args = parser.parse_args()
 
     load_dotenv(Path(__file__).parents[1] / ".env")
@@ -49,7 +59,7 @@ def main() -> None:
             flow,
             PydanticAI(f"openai-responses:{args.model}"),
         )
-        suite = bench(args.bench, args.n)
+        suite = bench(args.bench, args.n, args.seed)
         started = time.time()
         suite.evaluate(model=config)
         record = {
@@ -57,6 +67,7 @@ def main() -> None:
             "pattern": pattern,
             "model": args.model,
             "n": args.n,
+            "seed": args.seed,
             "overall": suite.overall_score,
             "llm_calls": config.llm.calls,
             "seconds": round(time.time() - started, 1),
