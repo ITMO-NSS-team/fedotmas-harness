@@ -60,3 +60,18 @@ cover all of it. Needs an OpenAI key in `.env`; run with the examples group, e.g
 | Master orchestrator | `sdk-llm/orchestrator.py` | structured plan sized at runtime, `action` as the code escape hatch for dynamic fan-out |
 | Handoff / Swarm | `sdk-llm/swarm.py` | stateful atoms end to end: `input=` templates, `merge=` structured handoff, `branch("station")` inside `.loop(until="done")` |
 | Mixed backends | `sdk-llm/backends.py` | the `LLM` seam itself: langchain wrapped inline beside the pydantic-ai default, `action` as the code body, one system |
+
+## dsl/
+
+The same systems as data (`fedotmas.dsl`): a JSON manifest names a pool of nodes and wires
+them with the serialized combinators; `dsl.compile` turns the document into the same `Flow`
+the sdk examples build in Python. Registries stay at the call site: code atoms via `atoms=`,
+pydantic models via `types=`. The first three mirror their sdk-llm/ namesakes (OpenAI key in
+`.env`); `staged.py` runs offline.
+
+| Shape | File | DSL surface |
+|---|---|---|
+| DAG with a parallel block | `dsl/dag.py` | prompt-string nodes, list = seq, `gather`, named-flow splice |
+| Handoff / Swarm | `dsl/swarm.py` | `types=` registry, `input` templates, `step`/`merge`, `branch` by state key, `loop` until a key |
+| Master orchestrator | `dsl/orchestrator.py` | `atoms=` registry (`ref:` node) as the code escape hatch beside prompted nodes |
+| Staged emission + repair | `dsl/staged.py` | `merge` of pool + wiring parts, `schema_for_flow` closed over the pool, `ManifestError` issues as feedback |
