@@ -37,6 +37,8 @@ def run_one(pattern: str, domain: ModuleType, args: argparse.Namespace) -> str:
     backend = PydanticAI(args.model)
     config = FlowModel(f"{pattern}/{args.model}", flow, backend)
     suite = domain.suite(args.n, args.seed)
+    out = OUT / args.out
+    out.mkdir(parents=True, exist_ok=True)
     started = time.time()
     suite.evaluate(model=config)
     record = {
@@ -53,7 +55,7 @@ def run_one(pattern: str, domain: ModuleType, args: argparse.Namespace) -> str:
         "seconds": round(time.time() - started, 1),
         "items": suite.predictions.to_dict("records"),
     }
-    path = OUT / f"{args.bench}-{pattern}-{slug(args.model)}.json"
+    path = out / f"{args.bench}-{pattern}-{slug(args.model)}.json"
     path.write_text(json.dumps(record, ensure_ascii=False, indent=1, default=str))
     return (
         f"{pattern:>14}: score {suite.overall_score:.2f}, "
@@ -69,10 +71,12 @@ def main() -> None:
     parser.add_argument("--model", default="openrouter:openai/gpt-oss-20b")
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--jobs", type=int, default=1)
+    parser.add_argument(
+        "--out", default="", help="subdir under out/ for this run's records"
+    )
     args = parser.parse_args()
 
     load_dotenv(Path(__file__).parents[1] / ".env")
-    OUT.mkdir(exist_ok=True)
     domain = importlib.import_module(args.bench)
     patterns = args.patterns.split(",")
 
