@@ -19,9 +19,19 @@ def _last_int(text: str) -> int:
 
 
 def _last_option(text: str, options: tuple[str, ...]) -> str:
-    pattern = "|".join(re.escape(o) for o in options)
-    hits = re.findall(rf"\b({pattern})\b", text)
-    return hits[-1] if hits else options[0]
+    """Pull the chosen choice letter from free-form CoT. The answer sits on the last line by
+    instruction, so prefer a line that looks like an answer (mentions 'answer', is just the
+    letter, or has a colon) scanning from the end — this dodges the lowercase 'a' that English
+    prose litters everywhere. Fall back to the last standalone letter anywhere."""
+    token = re.compile(rf"(?i)\b({'|'.join(re.escape(o) for o in options)})\b")
+    canon = {o.lower(): o for o in options}
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    for line in reversed(lines):
+        hits = token.findall(line)
+        if hits and ("answer" in line.lower() or ":" in line or len(line) <= 4):
+            return canon[hits[-1].lower()]
+    hits = token.findall(text)
+    return canon[hits[-1].lower()] if hits else options[0]
 
 
 class CountingLLM:
