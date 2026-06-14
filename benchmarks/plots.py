@@ -14,6 +14,7 @@ from report import OUT, ORDER, load, metrics, stable_oracle
 FIGS = Path(__file__).parent / "figures"
 GPT_OSS = "openrouter:openai/gpt-oss-20b"
 PATS = [p for p in ORDER if p != "router"]
+LABELS = {"debate": "voting"}  # display only; recorded data keeps the original name
 
 TEXT = {
     "en": {
@@ -26,7 +27,8 @@ TEXT = {
         "pp": "pp",
         "acc": "accuracy",
         "pa_title": "single (red) is on the cost/accuracy frontier (gpt-oss-20b)",
-        "pa_x": "tokens / task (log)",
+        "pa_x": "tokens / task, log scale (cheaper →)",
+        "pa_frontier": "Pareto frontier",
         "pa_easy": "GSM8K (easy)",
         "pa_hard": "LogiQA (hard)",
         "se_title": "LogiQA / gpt-oss-20b: headroom exists, zero-shot selection misses it",
@@ -41,8 +43,9 @@ TEXT = {
         "hr_best": "лучший фиксированный паттерн",
         "pp": "пп",
         "acc": "точность",
-        "pa_title": "single (красный) — на границе «стоимость/точность» (gpt-oss-20b)",
-        "pa_x": "токенов на задачу (лог. шкала)",
+        "pa_title": "single (красный) на границе «стоимость/точность» (gpt-oss-20b)",
+        "pa_x": "токенов на задачу, лог. шкала (дешевле →)",
+        "pa_frontier": "граница Парето",
         "pa_easy": "GSM8K (лёгкий)",
         "pa_hard": "LogiQA (трудный)",
         "se_title": "LogiQA / gpt-oss-20b: запас есть, zero-shot выбор его не берёт",
@@ -111,29 +114,54 @@ def fig_headroom(t: dict) -> None:
     plt.close(fig)
 
 
+def _frontier(acc: dict, tok: dict, pats: list[str]) -> list[str]:
+    # non-dominated set (minimize tokens, maximize accuracy): walk from the cheapest, keep a
+    # point only if it beats every cheaper one on accuracy. Returned sorted by cost ascending.
+    front: list[str] = []
+    best = -1.0
+    for p in sorted(pats, key=lambda p: tok[p]):
+        if acc[p] > best:
+            front.append(p)
+            best = acc[p]
+    return front
+
+
 def fig_pareto(t: dict) -> None:
-    # two panels: easy (converge) vs hard (spread); single sits top-left in both
+    # two panels: easy (converge) vs hard (spread). x inverted so cheaper is to the right and
+    # the good corner is top-right; the frontier line traces the non-dominated points.
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.5), sharey=False)
     for ax, (bench, name) in zip(
         axes, [("gsm8k", t["pa_easy"]), ("logiqa", t["pa_hard"])]
     ):
         a = agg(bench, GPT_OSS)
+        front = _frontier(a["acc"], a["tok"], list(a["acc"]))
+        ax.plot(
+            [a["tok"][p] for p in front],
+            [a["acc"][p] for p in front],
+            "-",
+            color="tab:blue",
+            alpha=0.45,
+            zorder=2,
+            label=t["pa_frontier"],
+        )
         for p in a["acc"]:
             color = "tab:red" if p == "single" else "tab:gray"
             ax.scatter(a["tok"][p], a["acc"][p], s=70, color=color, zorder=3)
             ax.annotate(
-                p,
+                LABELS.get(p, p),
                 (a["tok"][p], a["acc"][p]),
                 textcoords="offset points",
                 xytext=(6, 3),
                 fontsize=9,
             )
         ax.set_xscale("log")
-        ax.margins(x=0.18)  # room for the rightmost label
+        ax.invert_xaxis()  # cheaper to the right
+        ax.margins(x=0.18)  # room for the labels
         ax.set_xlabel(t["pa_x"])
         ax.set_ylabel(t["acc"])
         ax.set_title(name)
         ax.grid(True, alpha=0.3)
+        ax.legend(loc="lower left", fontsize=9)
     fig.suptitle(t["pa_title"])
     fig.tight_layout(rect=(0, 0, 1, 0.95))
     fig.savefig(FIGS / f"pareto{t['suffix']}.png", dpi=150)
