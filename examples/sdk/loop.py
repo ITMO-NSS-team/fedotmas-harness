@@ -1,10 +1,7 @@
 import asyncio
 
-from fedotmas.engine.contract import Fact, View
-from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.store import Store
-from fedotmas.engine.terminate import Budget, Goal
-from fedotmas.sdk import action
+from fedotmas.engine.contract import View
+from fedotmas.sdk import Flow, action
 
 THRESHOLD = 3
 
@@ -26,32 +23,22 @@ async def critique(draft: dict, view: View) -> dict:
     return {**draft, "approved": draft["quality"] >= THRESHOLD}
 
 
-async def run(name: str, system, seed: Fact, out: str) -> None:
-    store = Store()
-    stream = ReactiveExecutor().stream(
-        system, store, seed=[seed], terminate=Goal(lambda v: v.exists(out)) | Budget(20)
-    )
+async def run(name: str, flow: Flow[dict, dict], seed: dict) -> None:
     print(name)
-    async for r in stream:
+    async for r in flow.stream(seed):
         print(f"  step {r.step}: {r.fired} -> {[f.tag for f in r.writes]}")
-    print(f"  {out}:", store.snapshot().value(out))
+    out = await flow.run(seed)
+    assert out.ok, (out.reason, out.errors)
+    print("  final:", out.value)
 
 
 async def main() -> None:
     reflect = revise.loop(lambda s: s["quality"] >= THRESHOLD)
-    await run(
-        "reflection: revise.loop(quality >= 3)",
-        reflect.system(entry="seed", out="final"),
-        Fact(tag="seed", value={"v": 0, "quality": 0}),
-        "final",
-    )
+    await run("reflection: revise.loop(quality >= 3)", reflect, {"v": 0, "quality": 0})
 
     optimize = (generate + critique).loop(lambda s: s["approved"])
     await run(
-        "eval-optimizer: (generate + critique).loop(approved)",
-        optimize.system(entry="seed", out="final"),
-        Fact(tag="seed", value={"n": 0}),
-        "final",
+        "eval-optimizer: (generate + critique).loop(approved)", optimize, {"n": 0}
     )
 
 

@@ -25,10 +25,10 @@ bag of agents the runtime executes. The same flow can be compiled more than once
 nested inside a larger flow, because it bakes in no concrete tags until that moment.
 
 So there are two languages in play. The arrow language is what you write, and it comes in three
-forms that follow the shape of each operation. Two binary combinators are infix operators, `+`
-(sequence) and `*` (parallel). Transforms of a flow you already have are methods: `.loop`,
+forms that follow the shape of each operation. One binary combinator is an infix operator, `+`
+(sequence). Transforms of a flow you already have are methods: `.loop`,
 `.into`, `.merge`. The rest build a flow from several flows or a whole system, so they are
-plain functions: `gather`, `branch`, `nest`. The dividing line is simple: you
+plain functions: `gather` (parallel), `branch`, `nest`. The dividing line is simple: you
 either do more to a flow you have (operator or method) or assemble a new one from parts
 (function). The fact-and-agent language is what it compiles to. Most of this page is the arrow
 language, with the compiled trace shown alongside so you can see the seam; the atoms that fill
@@ -529,8 +529,8 @@ checker uses to verify the stitch on either side. Feed a `str` into a flow built
 
 Everything above leans on one idea. The runtime values are `Any` at execution time; the types
 live only at design time, checked by `ty` (or mypy) before you run. They buy correctness by
-construction. An unjoined parallel is a `tuple` the next stage must consume, a forgotten
-reducer is a `list` with nowhere to go, a loop over a non-state-preserving body is a receiver
+construction. An unreduced `gather` is a `list` with nowhere to go that the next stage must
+consume, a loop over a non-state-preserving body is a receiver
 that does not match `Flow[A, A]`. Each of these is a static error at the line you wrote,
 rather than a wrong fact discovered mid-run.
 
@@ -701,7 +701,7 @@ Things to keep in mind:
 - The types are a design-time contract. They are checked before the run and are `Any` at
   runtime, which is why the function signatures should be honest.
 - `+` and `.loop` enforce their stitch crisply. `branch` is looser, keep its cases homogeneous.
-- The join is never a special operator. A `*` product or a `gather` list is consumed by an
-  ordinary next stage, and the type makes that consumption mandatory.
+- The join is never a special operator. A `gather` list is consumed by an ordinary next stage,
+  and the type makes that consumption mandatory.
 - Use a flow where the topology is fixed. Use the blackboard where order is emergent, and `nest`
   to carry an emergent sub-system back into the arrow world.

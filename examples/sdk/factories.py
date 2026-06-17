@@ -1,11 +1,8 @@
 import asyncio
 from typing import Any
 
-from fedotmas.engine.contract import Fact, View
-from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.store import Store
-from fedotmas.engine.terminate import Goal
-from fedotmas.sdk import action, agent, branch
+from fedotmas.engine.contract import View
+from fedotmas.sdk import Flow, action, agent, branch
 
 
 class FakeLLM:
@@ -23,16 +20,14 @@ async def shout(text: str, view: View) -> str:
     return text.upper()
 
 
-async def run(name: str, system, seed: Fact, out: str) -> Any:
-    store = Store()
+async def run(name: str, flow: Flow[str, str], value: str) -> Any:
     print(name)
-    async for r in ReactiveExecutor().stream(
-        system, store, seed=[seed], terminate=Goal(lambda v: v.exists(out))
-    ):
+    async for r in flow.stream(value):
         print(f"  step {r.step}: {r.fired} -> {[f.tag for f in r.writes]}")
-    value = store.snapshot().value(out)
-    print(f"  {out}: {value}")
-    return value
+    out = await flow.run(value)
+    assert out.ok, (out.reason, out.errors)
+    print(f"  out: {out.value}")
+    return out.value
 
 
 async def main() -> None:
@@ -43,10 +38,7 @@ async def main() -> None:
     )
     chain = shout + summarize
     result = await run(
-        "chain: shout + summarize (action + agent)",
-        chain.system(entry="text", out="out"),
-        Fact(tag="text", value="hello world"),
-        "out",
+        "chain: shout + summarize (action + agent)", chain, "hello world"
     )
     assert result == "HELLO", result
 
@@ -60,10 +52,7 @@ async def main() -> None:
     writer = agent("write", prompt="Write:", llm=FakeLLM(lambda p, q: f"prose: {q}"))
     router = branch(route, {"math": solver, "prose": writer})
     answer = await run(
-        "branch: agent(labels=...) -> {math: solve, prose: write}",
-        router.system(entry="q", out="answer"),
-        Fact(tag="q", value="2 + 2"),
-        "answer",
+        "branch: agent(labels=...) -> {math: solve, prose: write}", router, "2 + 2"
     )
     assert answer == "2 + 2 = 4", answer
 

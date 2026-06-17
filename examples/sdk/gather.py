@@ -1,10 +1,7 @@
 import asyncio
 from collections import Counter
 
-from fedotmas.engine.contract import Fact, View
-from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.store import Store
-from fedotmas.engine.terminate import Goal
+from fedotmas.engine.contract import View
 from fedotmas.sdk import action, gather
 
 
@@ -30,17 +27,12 @@ async def majority(answers: list[str], view: View) -> str:
 
 async def main() -> None:
     vote = gather(solver_a, solver_b, solver_c) + majority
-    store = Store()
-    stream = ReactiveExecutor().stream(
-        vote.system(entry="q", out="answer"),
-        store,
-        seed=[Fact(tag="q", value="the meaning?")],
-        terminate=Goal(lambda v: v.exists("answer")),
-    )
     print("self-consistency: gather(a, b, c) + majority")
-    async for r in stream:
+    async for r in vote.stream("the meaning?"):
         print(f"  step {r.step}: {r.fired} -> {[f.tag for f in r.writes]}")
-    print("  answer:", store.snapshot().value("answer"))
+    run = await vote.run("the meaning?")
+    assert run.ok and run.value == "42", (run.reason, run.value)
+    print("  answer:", run.value)
 
 
 if __name__ == "__main__":

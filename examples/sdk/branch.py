@@ -1,9 +1,6 @@
 import asyncio
 
-from fedotmas.engine.contract import Fact, View
-from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.store import Store
-from fedotmas.engine.terminate import Goal
+from fedotmas.engine.contract import View
 from fedotmas.sdk import action, branch
 
 
@@ -30,19 +27,16 @@ async def code(q: str, view: View) -> str:
     return f"def f(): ...  # {q}"
 
 
+router = branch(classify, {"math": solve, "prose": write, "code": code})
+
+
 async def run(q: str) -> None:
-    router = branch(classify, {"math": solve, "prose": write, "code": code})
-    store = Store()
-    stream = ReactiveExecutor().stream(
-        router.system(entry="q", out="answer"),
-        store,
-        seed=[Fact(tag="q", value=q)],
-        terminate=Goal(lambda v: v.exists("answer")),
-    )
     print(f"q = {q!r}")
-    async for r in stream:
+    async for r in router.stream(q):
         print(f"  step {r.step}: {r.fired} -> {[f.tag for f in r.writes]}")
-    print("  answer:", store.snapshot().value("answer"))
+    out = await router.run(q)
+    assert out.ok, (out.reason, out.errors)
+    print("  answer:", out.value)
 
 
 async def main() -> None:

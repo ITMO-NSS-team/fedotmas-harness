@@ -1,10 +1,7 @@
 import asyncio
 
-from fedotmas.engine.contract import Fact, View
-from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.store import Store
-from fedotmas.engine.terminate import Goal
-from fedotmas.sdk import action, gather
+from fedotmas.engine.contract import View
+from fedotmas.sdk import Flow, action, gather
 
 
 @action
@@ -37,33 +34,21 @@ async def combine(parts: list[str], view: View) -> str:
     return " | ".join(parts)
 
 
-async def run(name: str, system, seed: Fact, out: str) -> None:
-    store = Store()
-    stream = ReactiveExecutor().stream(
-        system, store, seed=[seed], terminate=Goal(lambda v: v.exists(out))
-    )
+async def run(name: str, flow: Flow[str, str], value: str) -> None:
     print(name)
-    async for r in stream:
+    async for r in flow.stream(value):
         print(f"  step {r.step}: {r.fired} -> {[f.tag for f in r.writes]}")
-    print(f"  {out}:", store.snapshot().value(out))
+    out = await flow.run(value)
+    assert out.ok, (out.reason, out.errors)
+    print("  result:", out.value)
 
 
 async def main() -> None:
     chain = research + write + edit
-    await run(
-        "seq: research + write + edit",
-        chain.system(entry="topic", out="final"),
-        Fact(tag="topic", value="haiku"),
-        "final",
-    )
+    await run("seq: research + write + edit", chain, "haiku")
 
     fanned = gather(upper, reverse) + combine
-    await run(
-        "gather into seq: gather(upper, reverse) + combine",
-        fanned.system(entry="text", out="result"),
-        Fact(tag="text", value="abc"),
-        "result",
-    )
+    await run("gather into seq: gather(upper, reverse) + combine", fanned, "abc")
 
 
 if __name__ == "__main__":

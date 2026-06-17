@@ -25,3 +25,35 @@ on running code.
 | Contract-Net (P14) | `engine/contract_net.py` | `AuctionSelect` Policy picks the winning bidder |
 | Reflection (P15) | `engine/reflection.py` | single agent self-revises (critic folded in) |
 | Debate (P16) | `engine/debate.py` | parallel rounds judged in a loop, transcript accrues |
+
+## sdk/
+
+The typed SDK surface over the same engine: build atoms with `action`/`agent`, compose them
+with the arrow operators, and run with `flow.run(value)` / `flow.stream(value)` (which return
+an `Outcome` / yield `StepReport`s — no executor wiring by hand). These run with no API key
+(`agent` nodes use a small `FakeLLM` stub). See [`docs/sdk.md`](../docs/sdk.md).
+
+| File | SDK surface shown |
+|---|---|
+| `sdk/composition.py` | `+` sequence and `gather(...) + reducer` fan-out, run via `.stream`/`.run` |
+| `sdk/gather.py` | `gather(a, b, c) + majority` — self-consistency voting |
+| `sdk/branch.py` | `branch(classify, cases)` — route by a plain selector function |
+| `sdk/factories.py` | `action` + `agent` atoms (`FakeLLM`); a `labels=` classifier driving a `branch` |
+| `sdk/loop.py` | `.loop(until=...)` — reflection and evaluator-optimizer over a dict state |
+| `sdk/state.py` | dict state: `.into` / `.merge`, branch by state key, loop until a key |
+| `sdk/blackboard.py` | the blackboard surface: `Rule` + `blackboard`, produce-once and `when` triggers, goal stop |
+| `sdk/nest.py` | `nest(board, ...)` — a goal-terminating blackboard as one typed flow node |
+
+## sdk-llm/
+
+The same SDK against real models. Each file wires a backend through the `LLM` seam and reads
+an API key, so they need a `.env` (e.g. `OPENAI_API_KEY=...`) and run via `uv run python
+examples/sdk-llm/<file>.py`.
+
+| File | Pattern shown |
+|---|---|
+| `sdk-llm/backends.py` | the swappable `LLM` seam: a hand-written LangChain backend beside `PydanticAI`; `gather + assemble` |
+| `sdk-llm/dag.py` | diamond DAG: `extract + gather(support, oppose) + balance` |
+| `sdk-llm/orchestrator.py` | orchestrator-workers: `planner -> dynamic fan-out (action) -> synthesize` |
+| `sdk-llm/swarm.py` | handoff/swarm: `.merge()` handoffs, branch by `station`, loop until `done` |
+| `sdk-llm/blackboard.py` | prompt rules on the blackboard, a `when`-gated verifier, goal stop |
