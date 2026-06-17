@@ -1,14 +1,3 @@
-"""blackboard: rules self-activate on author-written conditions, no edges.
-
-Same shape as the hand-written engine/blackboard.py. A rule is a self-activating node; the
-first three lean on the produce-once default (fire when `reads` is present and `writes` is not
-yet) and need no explicit trigger. researcher and skeptic wake on the same hypothesis and fire
-in one parallel step; verifier waits on both their facts at once, a condition not reducible to
-one read, so it spells out `when` as a tag list (`!` marks a fact that must be absent). That
-opportunistic activation is what the arrows cannot express. blackboard() returns a Board;
-board.run derives the store and the terminate condition from the seed and the goal.
-"""
-
 import asyncio
 
 from fedotmas.engine.contract import View

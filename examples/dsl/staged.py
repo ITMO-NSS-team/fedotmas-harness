@@ -1,14 +1,3 @@
-"""Staged emission and repair: the meta-agent workflow in miniature, no model needed.
-
-A pool part and a wiring part merge into one manifest; schema_for_flow closes the wiring
-grammar over the pool, so a constrained emitter cannot name an unknown node; and when the
-wiring is wrong anyway, compile answers with every issue as (path, message, expected) —
-the feedback of an emit-validate-retry loop. The nodes are code atoms, so the run is
-offline.
-
-Run: uv run python examples/dsl/staged.py
-"""
-
 import asyncio
 import json
 

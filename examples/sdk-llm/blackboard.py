@@ -1,20 +1,6 @@
-"""Blackboard: declarative prompt rules self-activate on conditions, no fixed topology.
-
-Every rule here is a prompt, not code: Rule(prompt=...) is the rule-surface twin of the agent
-atom, with the backend bound once at blackboard(). researcher and skeptic both wake on the
-same hypothesis and run in parallel; verifier waits on two independent facts at once, a
-condition not reducible to one read, so it spells out `when` as a tag list (`!` marks a fact
-that must be absent), and its `input` template pulls both facts from the store by tag. The
-order falls out of the facts. board.run seeds the
-question and reads the conclusion back; the surface arrows cannot express this shape.
-
-Needs an OpenAI key in .env. Run: uv run --group examples python examples/sdk-llm/blackboard.py
-"""
-
 import asyncio
 
 from dotenv import load_dotenv
-
 from fedotmas.adapters.pydantic_ai import PydanticAI
 from fedotmas.sdk import Rule, blackboard
 

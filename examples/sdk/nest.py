@@ -1,10 +1,3 @@
-"""A blackboard enters the arrow world as one nested node.
-
-The blackboard surface (opportunistic, non-linear, uncheckable interior) is wrapped by nest
-into a Flow[str, str] with a typed boundary, then composed between two ordinary actions.
-The board runs in its own inner store to its goal; outside it is one opaque arrow.
-"""
-
 import asyncio
 
 from fedotmas.engine.contract import View

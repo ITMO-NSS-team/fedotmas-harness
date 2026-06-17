@@ -1,22 +1,10 @@
-"""Handoff / Swarm as data: the manifest spelling of sdk-llm/swarm.py.
-
-Every station is a prompted node over the dict state: an input template picks the ticket
-out, takes is dict, and the structured reply folds back in via step/merge — the handoff
-target rides inside the reply. The branch routes by the state key, the loop stops on a
-state key. The Literal constraint on station lives in the registered models: types= carries
-what the inline field vocabulary cannot.
-
-Needs an OpenAI key in .env. Run: uv run --group examples python examples/dsl/swarm.py
-"""
-
 import asyncio
 from typing import Literal
 
 from dotenv import load_dotenv
-from pydantic import BaseModel
-
 from fedotmas import dsl
 from fedotmas.adapters.pydantic_ai import PydanticAI
+from pydantic import BaseModel
 
 
 class TriageNote(BaseModel):

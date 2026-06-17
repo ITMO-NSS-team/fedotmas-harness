@@ -1,17 +1,10 @@
-"""Typed arrows compose where the flat combinators could not.
-
-Two fragments built from the same atoms, stitched by operators. The parallel block feeds
-a sequential stage (`gather` then `+`), the case the flat parallel/join could not nest. The
-types make the stitch checkable: combine must accept list[str], the gathered output.
-"""
-
 import asyncio
 
-from fedotmas.sdk import action, gather
 from fedotmas.engine.contract import Fact, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
 from fedotmas.engine.terminate import Goal
+from fedotmas.sdk import action, gather
 
 
 @action

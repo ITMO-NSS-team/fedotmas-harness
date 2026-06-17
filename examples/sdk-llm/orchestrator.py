@@ -1,22 +1,10 @@
-"""Master orchestrator: a planner sizes the work at runtime, workers fan out, one report back.
-
-The planner is an agent with structured output, so the plan's width is the model's choice,
-not the author's. The fan-out over that runtime-sized plan is the one place the declarative
-atoms do not reach, so it is an action, the code escape hatch, with real per-subtask
-concurrency via asyncio.gather; the synthesizer folds the results back to one report. LLM
-nodes bind the default backend at .run(); the action closes over the same client directly.
-
-Needs an OpenAI key in .env. Run: uv run --group examples python examples/sdk-llm/orchestrator.py
-"""
-
 import asyncio
 
 from dotenv import load_dotenv
-from pydantic import BaseModel
-
 from fedotmas.adapters.pydantic_ai import PydanticAI
 from fedotmas.engine.contract import View
 from fedotmas.sdk import action, agent
+from pydantic import BaseModel
 
 llm = PydanticAI("openai-responses:gpt-4o-mini")
 

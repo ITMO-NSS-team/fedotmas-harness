@@ -1,23 +1,10 @@
-"""Handoff / Swarm: the active station handles the ticket, then names who is active next.
-
-The stateful surface end to end, with no code in any node. Each station is an agent over a
-dict state: its `input` template picks the ticket out of the state, its structured reply
-(.merge()) folds back in, and because the reply's `station` field is part of that fold, the
-handoff target is data the model chose, constrained to real stations by a Literal. The branch
-routes by the state key ("station"), the loop stops on a state key ("done"), so the whole
-swarm is strings and types: exactly what a program that emits systems can write.
-
-Needs an OpenAI key in .env. Run: uv run --group examples python examples/sdk-llm/swarm.py
-"""
-
 import asyncio
 from typing import Literal
 
 from dotenv import load_dotenv
-from pydantic import BaseModel
-
 from fedotmas.adapters.pydantic_ai import PydanticAI
 from fedotmas.sdk import agent, branch
+from pydantic import BaseModel
 
 
 class TriageNote(BaseModel):

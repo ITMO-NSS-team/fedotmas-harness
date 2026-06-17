@@ -1,21 +1,9 @@
-"""TDD spec for the stateful surface: templates, .into/.merge, key-driven loop and branch, run.
-
-This pins the declarative state machinery: an agent node picks what the model sees with an
-`input` template over the state, the reply goes back into the state by composition, `.into`
-(one key) or `.merge` (structured reply folded in), a branch routes by a state key, a loop
-stops on a state key, and Flow.run executes the whole thing with the llm bound once as the
-default.
-A failing node ends the run with reason "error" instead of a traceback. The asserts are the
-contract; a FakeLLM stands in for the backend so the spec runs offline.
-"""
-
 import asyncio
 from typing import Any
 
-from pydantic import BaseModel
-
 from fedotmas.engine.contract import View
 from fedotmas.sdk import agent, branch
+from pydantic import BaseModel
 
 
 class FakeLLM:

@@ -1,17 +1,10 @@
-"""Iteration as a typed arrow: .loop threads state until a predicate clears.
-
-Reflection (P15) and Evaluator-Optimizer (P6) are the same loop. The body is a Flow[S, S]
-run each round as an isolated sub-system; .loop is only valid when input and output types
-match, so the state contract is checked. The predicate reads that state value.
-"""
-
 import asyncio
 
-from fedotmas.sdk import action
 from fedotmas.engine.contract import Fact, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
 from fedotmas.engine.terminate import Budget, Goal
+from fedotmas.sdk import action
 
 THRESHOLD = 3
 

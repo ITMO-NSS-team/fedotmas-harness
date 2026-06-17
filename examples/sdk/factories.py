@@ -1,22 +1,11 @@
-"""TDD spec for the atom factories: action and agent.
-
-This pins the API the factory code is written against. action lifts a python function (code),
-agent lifts a prompt into an LLM node; agent(labels=...) constrains the output to a finite
-label set, the classifier shape that drives branch. Both produce Flow[A, B] and compose with
-the same operators. The LLM seam
-is the LLM protocol, faked here so the spec runs without a backend.
-
-Run after the factories exist; until then it fails on import. The asserts are the contract.
-"""
-
 import asyncio
 from typing import Any
 
-from fedotmas.sdk import action, agent, branch
 from fedotmas.engine.contract import Fact, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
 from fedotmas.engine.terminate import Goal
+from fedotmas.sdk import action, agent, branch
 
 
 class FakeLLM:

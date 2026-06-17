@@ -1,16 +1,6 @@
-"""DAG with a parallel block, as data: the manifest spelling of sdk-llm/dag.py.
-
-Bare strings are prompts, a list is a sequence, gather is the parallel block, and a named
-flow splices in by name. dsl.compile turns the document into the same Flow the Python
-spelling builds; the llm still binds at .run().
-
-Needs an OpenAI key in .env. Run: uv run --group examples python examples/dsl/dag.py
-"""
-
 import asyncio
 
 from dotenv import load_dotenv
-
 from fedotmas import dsl
 from fedotmas.adapters.pydantic_ai import PydanticAI
 

@@ -1,22 +1,11 @@
-"""Master orchestrator as data: the manifest spelling of sdk-llm/orchestrator.py.
-
-The planner and synthesizer are prompted nodes in the document; the runtime-sized fan-out
-stays code, registered as an atom the document names by ref:. The wiring lives in the
-manifest, the escape hatch at the call site — atoms= and types= are compile parameters,
-not document content.
-
-Needs an OpenAI key in .env. Run: uv run --group examples python examples/dsl/orchestrator.py
-"""
-
 import asyncio
 
 from dotenv import load_dotenv
-from pydantic import BaseModel
-
 from fedotmas import dsl
 from fedotmas.adapters.pydantic_ai import PydanticAI
 from fedotmas.engine import View
 from fedotmas.sdk import action
+from pydantic import BaseModel
 
 llm = PydanticAI("openai-responses:gpt-4o-mini")
 

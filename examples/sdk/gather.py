@@ -1,18 +1,11 @@
-"""N-ary parallel: gather fans one input to many same-typed branches and lists the results.
-
-gather takes a variable number of Flow[A, B] and runs them on the same input, yielding
-Flow[A, list[B]], the shape voting (P3/P4) and mixture-of-agents (P7) need. The
-reducer is an ordinary next action over the list, so the type makes the join mandatory.
-"""
-
 import asyncio
 from collections import Counter
 
-from fedotmas.sdk import action, gather
 from fedotmas.engine.contract import Fact, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
 from fedotmas.engine.terminate import Goal
+from fedotmas.sdk import action, gather
 
 
 @action

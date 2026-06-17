@@ -1,17 +1,6 @@
-"""DAG with a parallel block: extract, argue both sides at once, then weigh.
-
-The arrow algebra on stateless str -> str nodes: + is sequence, gather runs branches in
-parallel and lists their outputs for the next stage. No node names a backend; the llm binds once as the
-default at .run(), which also derives the store, the seed, and the terminate condition, and
-hands back an Outcome: .value, .ok, .reason, and the full .steps trace.
-
-Needs an OpenAI key in .env. Run: uv run --group examples python examples/sdk-llm/dag.py
-"""
-
 import asyncio
 
 from dotenv import load_dotenv
-
 from fedotmas.adapters.pydantic_ai import PydanticAI
 from fedotmas.sdk import agent, gather
 

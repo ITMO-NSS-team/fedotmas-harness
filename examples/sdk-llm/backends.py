@@ -2,12 +2,11 @@ import asyncio
 from typing import Any
 
 from dotenv import load_dotenv
-from langchain.chat_models import init_chat_model
-from langchain_core.messages import HumanMessage, SystemMessage
-
 from fedotmas.adapters.pydantic_ai import PydanticAI
 from fedotmas.engine.contract import View
 from fedotmas.sdk import action, agent, gather
+from langchain.chat_models import init_chat_model
+from langchain_core.messages import HumanMessage, SystemMessage
 
 load_dotenv()
 

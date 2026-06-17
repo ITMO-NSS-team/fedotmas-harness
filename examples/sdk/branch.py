@@ -1,17 +1,10 @@
-"""Router (P8) as a typed arrow: branch picks one case by a label, exactly one fires.
-
-select returns the case key; only that case's sub-flow is fed an input fact, so only its
-chain runs and converges to the branch output. Every case is a Flow[A, B] with the same
-boundary, so the cases are interchangeable by type and each is itself composable.
-"""
-
 import asyncio
 
-from fedotmas.sdk import action, branch
 from fedotmas.engine.contract import Fact, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
 from fedotmas.engine.terminate import Goal
+from fedotmas.sdk import action, branch
 
 
 def classify(q: str) -> str:
