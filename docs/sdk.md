@@ -28,7 +28,7 @@ So there are two languages in play. The arrow language is what you write, and it
 forms that follow the shape of each operation. Two binary combinators are infix operators, `+`
 (sequence) and `*` (parallel). Transforms of a flow you already have are methods: `.loop`,
 `.into`, `.merge`. The rest build a flow from several flows or a whole system, so they are
-plain functions: `gather_all`, `branch`, `nest`. The dividing line is simple: you
+plain functions: `gather`, `branch`, `nest`. The dividing line is simple: you
 either do more to a flow you have (operator or method) or assemble a new one from parts
 (function). The fact-and-agent language is what it compiles to. Most of this page is the arrow
 language, with the compiled trace shown alongside so you can see the seam; the atoms that fill
@@ -334,13 +334,13 @@ as a runtime mistake, it shows up as a static one.
     `*` binds tighter than `+` in Python, so `a + b * c + d` groups as `a + (b * c) + d`. The
     parallel block clusters on its own without parentheses, which is usually what you mean.
 
-## N-ary parallel: gather_all
+## N-ary parallel: gather
 
 `*` pairs exactly two arrows, nesting tuples if you chain it. When you want a variable number
-of same-typed branches, `gather_all` is the n-ary form.
+of same-typed branches, `gather` is the n-ary form.
 
 ```python
-def gather_all(*flows: Flow[A, B]) -> Flow[A, list[B]]: ...
+def gather(*flows: Flow[A, B]) -> Flow[A, list[B]]: ...
 ```
 
 It fans one input to every branch and collects the outputs into a `list[B]`. A reducer over
@@ -349,7 +349,7 @@ that list is, again, just the next stage.
 ```python
 from collections import Counter
 
-from fedotmas.sdk import action, gather_all
+from fedotmas.sdk import action, gather
 
 
 @action
@@ -365,22 +365,22 @@ async def majority(answers: list[str], view: View) -> str:
     return Counter(answers).most_common(1)[0][0]
 
 
-vote = gather_all(solver_a, solver_b, solver_c) + majority
+vote = gather(solver_a, solver_b, solver_c) + majority
 ```
 
 Output:
 
 ```
 step 0: ['solver_a#2', 'solver_b#3', 'solver_c#4'] -> ['solver_a#2', 'solver_b#3', 'solver_c#4']
-step 1: ['gather_all#1'] -> ['gather_all#1']
+step 1: ['gather#1'] -> ['gather#1']
 step 2: ['majority#5'] -> ['majority#5']
 step 3: ['alias:answer'] -> ['answer']
 answer: 42
 ```
 
-All three solvers run together, `gather_all#1` collects the list, `majority` reduces it. This is
+All three solvers run together, `gather#1` collects the list, `majority` reduces it. This is
 the shape that voting and mixture-of-agents want, and the `list[B]` output makes the reducer
-mandatory by type: a bare `gather_all` is not yet a usable value, it is a list waiting for a fold.
+mandatory by type: a bare `gather` is not yet a usable value, it is a list waiting for a fold.
 
 ## Branch
 
@@ -722,7 +722,7 @@ the seam between them.
 | `sdk.Condition`              | a declarative predicate over one state key, for `.loop` (data, not code) |
 | `Flow.__add__` (`+`)         | sequence, `Flow[A, B] + Flow[B, C] -> Flow[A, C]`             |
 | `Flow.__mul__` (`*`)         | parallel product, `-> Flow[A, tuple[B, C]]`                   |
-| `sdk.gather_all`             | n-ary parallel, `*Flow[A, B] -> Flow[A, list[B]]`            |
+| `sdk.gather`                 | n-ary parallel, `*Flow[A, B] -> Flow[A, list[B]]`            |
 | `sdk.branch`                 | route to one case by a label: callable, state key, or a labels agent |
 | `Flow.loop`                  | iterate a state-preserving flow until a callable, state key, or `Condition` clears; `budget=` caps one round |
 | `Flow.into` / `Flow.merge`   | thread a dict state past a step: output under one key / structured output folded in |
@@ -754,7 +754,7 @@ Things to keep in mind:
 - The types are a design-time contract. They are checked before the run and are `Any` at
   runtime, which is why the function signatures should be honest.
 - `+` and `.loop` enforce their stitch crisply. `branch` is looser, keep its cases homogeneous.
-- The join is never a special operator. A `*` product or a `gather_all` list is consumed by an
+- The join is never a special operator. A `*` product or a `gather` list is consumed by an
   ordinary next stage, and the type makes that consumption mandatory.
 - Use a flow where the topology is fixed. Use the blackboard where order is emergent, and `nest`
   to carry an emergent sub-system back into the arrow world.

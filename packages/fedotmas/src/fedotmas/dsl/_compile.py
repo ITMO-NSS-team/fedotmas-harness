@@ -154,7 +154,7 @@ class _Compiler:
                 out = out + step
             return out
         if isinstance(e, Gather):
-            return sdk.gather_all(
+            return sdk.gather(
                 *(
                     self.expr(item, f"{path}.gather.{i}", stack)
                     for i, item in enumerate(e.gather)

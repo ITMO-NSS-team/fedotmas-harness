@@ -43,7 +43,7 @@ C = TypeVar("C")
 
 class Flow(Generic[A, B]):
     """A typed dataflow fragment from input A to output B. Make atoms with action (code) or
-    agent (LLM), then compose: + is sequence, * and gather_all are parallel, branch routes
+    agent (LLM), then compose: + is sequence, * and gather are parallel, branch routes
     by label, .loop iterates, nest wraps a whole sub-system as one node. `.system(entry, out)`
     compiles the fragment to an engine System; `.run(value)` compiles and executes it in one
     call. The type parameters check each stitch: a + b only type-checks when b accepts what a
@@ -275,12 +275,12 @@ def branch(
     return _Branch(select, cases)
 
 
-class _GatherAll(Flow[Any, Any]):
+class _Gather(Flow[Any, Any]):
     def __init__(self, flows: tuple[Flow[Any, Any], ...]) -> None:
         self._flows = flows
 
     def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
-        out = ctx.fresh("gather_all")
+        out = ctx.fresh("gather")
         nodes: list[Node] = []
         srcs: list[str] = []
         for flow in self._flows:
@@ -290,15 +290,14 @@ class _GatherAll(Flow[Any, Any]):
         return [*nodes, _collect_node(out, srcs, out)], out
 
 
-def gather_all(*flows: Flow[A, B]) -> Flow[A, list[B]]:
+def gather(*flows: Flow[A, B]) -> Flow[A, list[B]]:
     """Run several flows on the same input in parallel and collect their outputs into a list,
     joined when all complete. The n-ary form of *; follow it with a reducer (e.g. + majority)
-    to fold the list into one value. Named gather_all, not gather, so it never shadows
-    asyncio.gather.
+    to fold the list into one value. Matches the dsl `gather` form.
     """
     if not flows:
-        raise ValueError("gather_all needs at least one flow")
-    return _GatherAll(flows)
+        raise ValueError("gather needs at least one flow")
+    return _Gather(flows)
 
 
 class _Nest(Flow[A, B]):

@@ -13,7 +13,7 @@ from fedotmas.sdk import (
     agent,
     blackboard,
     branch,
-    gather_all,
+    gather,
     nest,
 )
 
@@ -61,14 +61,14 @@ async def test_par_pairs_both_outputs():
     assert run.value == (2, 3)
 
 
-async def test_gather_all_collects_in_flow_order():
-    run = await gather_all(action(double), action(triple), action(echo)).run(2)
+async def test_gather_collects_in_flow_order():
+    run = await gather(action(double), action(triple), action(echo)).run(2)
     assert run.value == [4, 6, 2]
 
 
-def test_gather_all_rejects_empty():
+def test_gather_rejects_empty():
     with pytest.raises(ValueError, match="at least one flow"):
-        gather_all()
+        gather()
 
 
 async def test_branch_routes_by_callable():

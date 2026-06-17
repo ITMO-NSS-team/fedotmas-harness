@@ -1,7 +1,7 @@
 """The arrow surface: typed dataflow fragments that compile to an engine System.
 
 A Flow[A, B] is a fragment from an input of type A to an output of type B. Flows compose into
-whole systems: + is sequence, * is the binary parallel product, gather_all its n-ary form, branch
+whole systems: + is sequence, * is the binary parallel product, gather its n-ary form, branch
 routes to one case by a label, .loop iterates a state-preserving flow, .into and .merge thread
 a dict state past a step, nest runs a sub-system as one opaque node. The type parameters make each stitch checkable: a + b only type-checks when
 b accepts what a produces, so an unjoined parallel (a tuple the next stage must consume) becomes
@@ -18,7 +18,7 @@ program can emit as data: .loop(until=) accepts a state key or a Condition next 
 and branch(select=) accepts a state key next to a callable or a label-producing flow (an
 agent with labels=).
 
-One event-wave caveat: a join (* or gather_all) reads the latest version of each source, and
+One event-wave caveat: a join (* or gather) reads the latest version of each source, and
 re-fires as soon as any source gains one. In a single-shot run that is exactly "fire once when
 all arrive", but under mid-run commits with branches of unequal length a join can emit a mixed
 pair (one branch's new value, the other's stale one) before the slower branch lands. Waves are
@@ -29,8 +29,8 @@ algebra lives in _algebra, the declarative Condition in _condition, the run Outc
 _outcome, and the node factories everything compiles to in _nodes.
 """
 
-from fedotmas.sdk.flow._algebra import Flow, branch, gather_all, nest
+from fedotmas.sdk.flow._algebra import Flow, branch, gather, nest
 from fedotmas.sdk.flow._condition import Condition
 from fedotmas.sdk.flow._outcome import Outcome
 
-__all__ = ["Condition", "Flow", "Outcome", "branch", "gather_all", "nest"]
+__all__ = ["Condition", "Flow", "Outcome", "branch", "gather", "nest"]
