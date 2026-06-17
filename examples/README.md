@@ -29,7 +29,7 @@ on running code.
 ## sdk/
 
 The embedded Python surface (`fedotmas.sdk`). Typed `Flow[A, B]` arrows compose with `+`
-(sequence), `*` / `gather` (parallel), `branch`, `.loop`, and `nest`, the type parameters
+(sequence), `gather` (parallel), `branch`, `.loop`, and `nest`, the type parameters
 making each stitch checkable by `ty`. The rule surface (`blackboard`) sits beside them for
 emergent activation. Every file compiles to the same engine `System` and streams its trace.
 
@@ -37,7 +37,7 @@ emergent activation. Every file compiles to the same engine `System` and streams
 |---|---|---|
 | atom factories | `sdk/factories.py` | `action` (code) and `agent` (LLM, incl. `labels` classifier) lift leaves into `Flow` |
 | stateful atoms + run | `sdk/state.py` | `input=` templates, `into`/`merge`, `branch("key")`, `.loop("key")`, `Flow.run` |
-| seq, parallel-into-seq | `sdk/composition.py` | `a + b + c`, `(a * b) + c` |
+| seq, parallel-into-seq | `sdk/composition.py` | `a + b + c`, `gather(a, b) + c` |
 | loop (reflection, eval-optimizer) | `sdk/loop.py` | `body.loop(until)` |
 | branch / router | `sdk/branch.py` | `branch(select, cases)` |
 | n-ary parallel + reduce | `sdk/gather.py` | `gather(a, b, c) + reduce` |
@@ -55,7 +55,7 @@ cover all of it. Needs an OpenAI key in `.env`; run with the examples group, e.g
 
 | Shape | File | SDK surface |
 |---|---|---|
-| DAG with a parallel block | `sdk-llm/dag.py` | stateless arrows: `extract + (support * oppose) + balance`, `Flow.run` and `Outcome` |
+| DAG with a parallel block | `sdk-llm/dag.py` | stateless arrows: `extract + gather(support, oppose) + balance`, `Flow.run` and `Outcome` |
 | Blackboard | `sdk-llm/blackboard.py` | declarative prompt rules (`rule(prompt=...)`), opportunistic `when` as a tag list, `input` template over store tags, `board.run` |
 | Master orchestrator | `sdk-llm/orchestrator.py` | structured plan sized at runtime, `action` as the code escape hatch for dynamic fan-out |
 | Handoff / Swarm | `sdk-llm/swarm.py` | stateful atoms end to end: `input=` templates, `merge=` structured handoff, `branch("station")` inside `.loop(until="done")` |

@@ -56,11 +56,6 @@ async def test_seq_pipes_left_into_right():
     assert run.value == 12
 
 
-async def test_par_pairs_both_outputs():
-    run = await (action(double) * action(triple)).run(1)
-    assert run.value == (2, 3)
-
-
 async def test_gather_collects_in_flow_order():
     run = await gather(action(double), action(triple), action(echo)).run(2)
     assert run.value == [4, 6, 2]
@@ -242,11 +237,11 @@ async def test_nest_budget_caps_a_non_quiescing_inner_board():
 @pytest.mark.xfail(
     strict=True,
     reason="joins are not wave-aligned: a second wave over unequal branch lengths "
-    "emits a mixed tuple; needs an epoch notion",
+    "emits a mixed list; needs an epoch notion",
 )
 async def test_join_waves_do_not_mix_across_unequal_branches():
     slow = action(echo, name="s1") + action(echo, name="s2")
-    system = (action(double) * slow).system(entry="in", out="out")
+    system = gather(action(double), slow).system(entry="in", out="out")
     store = Store()
     fed = False
     async for _ in ReactiveExecutor().stream(
@@ -259,4 +254,4 @@ async def test_join_waves_do_not_mix_across_unequal_branches():
             store.commit([Fact(tag="in", value=10, producer="feeder", step=99)])
             fed = True
     outs = [f.value for f in store.snapshot().query("out")]
-    assert outs == [(2, 1), (20, 10)]
+    assert outs == [[2, 1], [20, 10]]

@@ -281,70 +281,18 @@ to line up, which is the entire safety claim. If you write `research + edit` whe
 a draft and the other expects something else, the checker rejects the `+` itself, at the line
 where you wrote it, before any run.
 
-## Parallel: `*`
+## Parallel: gather
 
-`a * b` runs both arrows on the same input and pairs their outputs into a tuple.
-
-```python
-def __mul__(self, other: Flow[A, C]) -> Flow[A, tuple[B, C]]: ...
-```
-
-A `Flow[A, B]` times a `Flow[A, C]` is a `Flow[A, tuple[B, C]]`. Both sides read the same `A`,
-the runtime runs them together, and the result is `(B, C)`. There is no separate join
-operator. The join is an ordinary next stage that consumes the tuple.
-
-```python
-@action
-async def upper(text: str, view: View) -> str:
-    return text.upper()
-
-
-@action
-async def reverse(text: str, view: View) -> str:
-    return text[::-1]
-
-
-@action
-async def combine(parts: tuple[str, str], view: View) -> str:
-    return " | ".join(parts)
-
-
-fanned = (upper * reverse) + combine
-```
-
-Output of running `fanned` on `"abc"`:
-
-```
-step 0: ['upper#1', 'reverse#2'] -> ['upper#1', 'reverse#2']
-step 1: ['par#3'] -> ['par#3']
-step 2: ['combine#4'] -> ['combine#4']
-step 3: ['alias:result'] -> ['result']
-result: ABC | cba
-```
-
-Both branches fire in step 0. The `par#3` agent in step 1 is the implicit pairing: it waits
-for both branch outputs and writes the tuple. Then `combine` consumes it.
-
-This is where the types earn their keep. `combine` is typed `tuple[str, str] -> str`. If you
-forget the join and try to feed the product straight into a stage that wants a single string,
-the type does not line up and the `+` is rejected. The unjoined parallel cannot slip through
-as a runtime mistake, it shows up as a static one.
-
-!!! note "Precedence does the right thing"
-    `*` binds tighter than `+` in Python, so `a + b * c + d` groups as `a + (b * c) + d`. The
-    parallel block clusters on its own without parentheses, which is usually what you mean.
-
-## N-ary parallel: gather
-
-`*` pairs exactly two arrows, nesting tuples if you chain it. When you want a variable number
-of same-typed branches, `gather` is the n-ary form.
+`gather(a, b, ...)` runs several arrows on the same input and collects their outputs into a
+list. It is the only parallel combinator; there is no binary product operator.
 
 ```python
 def gather(*flows: Flow[A, B]) -> Flow[A, list[B]]: ...
 ```
 
-It fans one input to every branch and collects the outputs into a `list[B]`. A reducer over
-that list is, again, just the next stage.
+A handful of `Flow[A, B]` become a `Flow[A, list[B]]`. Every branch reads the same `A`, the
+runtime runs them together, and the result is the list of their outputs in branch order.
+There is no separate join operator. The join is an ordinary next stage that consumes the list.
 
 ```python
 from collections import Counter
@@ -575,7 +523,7 @@ Second, because the wrapped target has no static arrow type, the
 checker cannot infer the boundary types. You annotate them yourself
 (`solve: Flow[str, str] = nest(...)`), and that annotation is load-bearing: it is what the
 checker uses to verify the stitch on either side. Feed a `str` into a flow built around a
-`Flow[tuple[str, str], str]` nest and the mismatch is caught.
+`Flow[list[str], str]` nest and the mismatch is caught.
 
 ## Why the types
 
@@ -721,8 +669,7 @@ the seam between them.
 | `sdk.LLM`                    | the LLM seam, one async `complete(prompt, input, view, returns)` |
 | `sdk.Condition`              | a declarative predicate over one state key, for `.loop` (data, not code) |
 | `Flow.__add__` (`+`)         | sequence, `Flow[A, B] + Flow[B, C] -> Flow[A, C]`             |
-| `Flow.__mul__` (`*`)         | parallel product, `-> Flow[A, tuple[B, C]]`                   |
-| `sdk.gather`                 | n-ary parallel, `*Flow[A, B] -> Flow[A, list[B]]`            |
+| `sdk.gather`                 | parallel, `*Flow[A, B] -> Flow[A, list[B]]`                  |
 | `sdk.branch`                 | route to one case by a label: callable, state key, or a labels agent |
 | `Flow.loop`                  | iterate a state-preserving flow until a callable, state key, or `Condition` clears; `budget=` caps one round |
 | `Flow.into` / `Flow.merge`   | thread a dict state past a step: output under one key / structured output folded in |

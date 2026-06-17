@@ -1,10 +1,10 @@
 """The arrow surface: typed dataflow fragments that compile to an engine System.
 
 A Flow[A, B] is a fragment from an input of type A to an output of type B. Flows compose into
-whole systems: + is sequence, * is the binary parallel product, gather its n-ary form, branch
+whole systems: + is sequence, gather runs branches in parallel and lists their outputs, branch
 routes to one case by a label, .loop iterates a state-preserving flow, .into and .merge thread
 a dict state past a step, nest runs a sub-system as one opaque node. The type parameters make each stitch checkable: a + b only type-checks when
-b accepts what a produces, so an unjoined parallel (a tuple the next stage must consume) becomes
+b accepts what a produces, so an unjoined parallel (a list the next stage must consume) becomes
 a type error, not a runtime footgun.
 
 This package is the algebra only. The leaves that fill it, action (code) and agent (a prompt
@@ -18,10 +18,10 @@ program can emit as data: .loop(until=) accepts a state key or a Condition next 
 and branch(select=) accepts a state key next to a callable or a label-producing flow (an
 agent with labels=).
 
-One event-wave caveat: a join (* or gather) reads the latest version of each source, and
+One event-wave caveat: a join (gather) reads the latest version of each source, and
 re-fires as soon as any source gains one. In a single-shot run that is exactly "fire once when
 all arrive", but under mid-run commits with branches of unequal length a join can emit a mixed
-pair (one branch's new value, the other's stale one) before the slower branch lands. Waves are
+list (one branch's new value, the other's stale one) before the slower branch lands. Waves are
 not yet aligned per join; that needs an epoch notion the engine does not have.
 
 Inside, the package splits by layer: this __init__ is the public surface; the operator

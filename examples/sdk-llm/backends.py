@@ -7,7 +7,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from fedotmas.adapters.pydantic_ai import PydanticAI
 from fedotmas.engine.contract import View
-from fedotmas.sdk import action, agent
+from fedotmas.sdk import action, agent, gather
 
 load_dotenv()
 
@@ -36,12 +36,12 @@ headline = agent(
 
 
 @action
-async def assemble(pair: tuple[str, str], view: View) -> str:
-    summary, title = pair
+async def assemble(parts: list[str], view: View) -> str:
+    summary, title = parts
     return f"# {title}\n\n{summary}"
 
 
-system = (summarize * headline) + assemble
+system = gather(summarize, headline) + assemble
 
 TEXT = (
     "The same orchestration engine can host agents written against different frameworks, "

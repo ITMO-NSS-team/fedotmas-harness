@@ -1,7 +1,7 @@
 """DAG with a parallel block: extract, argue both sides at once, then weigh.
 
-The arrow algebra on stateless str -> str nodes: + is sequence, * is the parallel product
-whose tuple the next stage consumes. No node names a backend; the llm binds once as the
+The arrow algebra on stateless str -> str nodes: + is sequence, gather runs branches in
+parallel and lists their outputs for the next stage. No node names a backend; the llm binds once as the
 default at .run(), which also derives the store, the seed, and the terminate condition, and
 hands back an Outcome: .value, .ok, .reason, and the full .steps trace.
 
@@ -13,7 +13,7 @@ import asyncio
 from dotenv import load_dotenv
 
 from fedotmas.adapters.pydantic_ai import PydanticAI
-from fedotmas.sdk import agent
+from fedotmas.sdk import agent, gather
 
 extract = agent(
     "extract", prompt="Extract the central claim of the text in one sentence."
@@ -22,12 +22,12 @@ support = agent("support", prompt="Give the single strongest argument FOR the cl
 oppose = agent("oppose", prompt="Give the single strongest argument AGAINST the claim.")
 balance = agent(
     "balance",
-    prompt="You get a (for, against) pair of arguments. Weigh them and give a one-sentence verdict.",
-    takes=tuple,
+    prompt="You get a [for, against] list of arguments. Weigh them and give a one-sentence verdict.",
+    takes=list,
     returns=str,
 )
 
-dag = extract + (support * oppose) + balance
+dag = extract + gather(support, oppose) + balance
 
 TEXT = (
     "Multi-agent systems should be compiled from a declarative spec rather than "

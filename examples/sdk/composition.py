@@ -1,13 +1,13 @@
 """Typed arrows compose where the flat combinators could not.
 
 Two fragments built from the same atoms, stitched by operators. The parallel block feeds
-a sequential stage (`*` then `+`), the case the flat parallel/join could not nest. The
-types make the stitch checkable: combine must accept tuple[str, str], the product output.
+a sequential stage (`gather` then `+`), the case the flat parallel/join could not nest. The
+types make the stitch checkable: combine must accept list[str], the gathered output.
 """
 
 import asyncio
 
-from fedotmas.sdk import action
+from fedotmas.sdk import action, gather
 from fedotmas.engine.contract import Fact, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
@@ -40,7 +40,7 @@ async def reverse(text: str, view: View) -> str:
 
 
 @action
-async def combine(parts: tuple[str, str], view: View) -> str:
+async def combine(parts: list[str], view: View) -> str:
     return " | ".join(parts)
 
 
@@ -64,9 +64,9 @@ async def main() -> None:
         "final",
     )
 
-    fanned = (upper * reverse) + combine
+    fanned = gather(upper, reverse) + combine
     await run(
-        "par into seq: (upper * reverse) + combine",
+        "gather into seq: gather(upper, reverse) + combine",
         fanned.system(entry="text", out="result"),
         Fact(tag="text", value="abc"),
         "result",

@@ -35,14 +35,6 @@ class _Ctx:
         return f"{hint}#{self.n}"
 
 
-def _gather_node(name: str, srcs: list[str], out: str) -> Node:
-    async def invoke(input: Any, view: View) -> Result:
-        value = tuple(view.value(s) for s in srcs)
-        return Result(writes=[Fact(tag=out, value=value)])
-
-    return as_node(invoke, name=name, reads=" ".join(srcs))
-
-
 def _collect_node(name: str, srcs: list[str], out: str) -> Node:
     async def invoke(input: Any, view: View) -> Result:
         return Result(writes=[Fact(tag=out, value=[view.value(s) for s in srcs])])

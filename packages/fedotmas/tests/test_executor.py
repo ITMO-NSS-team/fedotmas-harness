@@ -13,7 +13,7 @@ from fedotmas.engine import (
     System,
     as_node,
 )
-from fedotmas.sdk import action
+from fedotmas.sdk import action, gather
 
 
 async def double(x, view):
@@ -68,8 +68,8 @@ async def test_a_node_without_reads_fires_at_most_once_per_run():
     assert run.reason == "quiescence"
 
 
-async def test_par_join_refires_on_a_second_input_wave():
-    system = (action(double) * action(triple)).system(entry="in", out="out")
+async def test_gather_join_refires_on_a_second_input_wave():
+    system = gather(action(double), action(triple)).system(entry="in", out="out")
     store = Store()
     fed = False
     async for _ in ReactiveExecutor().stream(
@@ -82,7 +82,7 @@ async def test_par_join_refires_on_a_second_input_wave():
             store.commit([Fact(tag="in", value=10, producer="feeder", step=99)])
             fed = True
     outs = [f.value for f in store.snapshot().query("out")]
-    assert outs == [(2, 3), (20, 30)]
+    assert outs == [[2, 3], [20, 30]]
 
 
 async def test_budget_counts_the_run_index_not_the_store_step():
@@ -131,7 +131,7 @@ async def test_default_seeds_get_fresh_keys_on_a_warm_store():
 
 
 async def test_sequential_runs_re_derive_and_converge():
-    system = (action(double) * action(triple)).system(entry="in", out="out")
+    system = gather(action(double), action(triple)).system(entry="in", out="out")
     store = Store()
     await ReactiveExecutor().run(
         system,
@@ -143,10 +143,10 @@ async def test_sequential_runs_re_derive_and_converge():
         system,
         store,
         seed=[Fact(tag="in", value=10)],
-        terminate=Goal(lambda v: v.value("out") == (20, 30)),
+        terminate=Goal(lambda v: v.value("out") == [20, 30]),
     )
     view = store.snapshot()
-    assert view.value("out") == (20, 30)
+    assert view.value("out") == [20, 30]
     keys = [f.key for f in view.query("*")]
     assert len(keys) == len(set(keys))
 
@@ -168,7 +168,9 @@ async def test_halt_on_error_ends_the_run_with_the_traceback():
 
 
 async def test_halt_on_error_false_keeps_the_rest_running():
-    run = await (action(boom) * action(fine)).run("x", halt_on_error=False, budget=5)
+    run = await gather(action(boom), action(fine)).run(
+        "x", halt_on_error=False, budget=5
+    )
     assert not run.ok
     assert run.reason == "stalled"
     assert [e.tag.startswith("error:boom") for e in run.errors] == [True]

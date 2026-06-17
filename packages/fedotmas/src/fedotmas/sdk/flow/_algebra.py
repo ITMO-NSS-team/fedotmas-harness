@@ -1,7 +1,7 @@
 """Internal: Flow and the combinators, the operator algebra of the arrow surface.
 
-Flow and its combinator subclasses are mutually recursive (Flow methods build _Seq/_Par/
-_Loop, which subclass Flow), so they live together. Each combinator's _build compiles to
+Flow and its combinator subclasses are mutually recursive (Flow methods build _Seq/_Loop,
+which subclass Flow), so they live together. Each combinator's _build compiles to
 nodes via the factories in _nodes.
 """
 
@@ -22,7 +22,6 @@ from fedotmas.sdk.flow._nodes import (
     _alias_node,
     _collect_node,
     _Ctx,
-    _gather_node,
     _inner_guard,
     _into_node,
     _loop_finish_node,
@@ -43,7 +42,7 @@ C = TypeVar("C")
 
 class Flow(Generic[A, B]):
     """A typed dataflow fragment from input A to output B. Make atoms with action (code) or
-    agent (LLM), then compose: + is sequence, * and gather are parallel, branch routes
+    agent (LLM), then compose: + is sequence, gather runs branches in parallel, branch routes
     by label, .loop iterates, nest wraps a whole sub-system as one node. `.system(entry, out)`
     compiles the fragment to an engine System; `.run(value)` compiles and executes it in one
     call. The type parameters check each stitch: a + b only type-checks when b accepts what a
@@ -118,9 +117,6 @@ class Flow(Generic[A, B]):
     def __add__(self, other: Flow[B, C]) -> Flow[A, C]:
         return _Seq(self, other)
 
-    def __mul__(self, other: Flow[A, C]) -> Flow[A, tuple[B, C]]:
-        return _Par(self, other)
-
     def into(self: Flow[dict, Any], key: str) -> Flow[dict, dict]:
         """Thread a dict state past this flow: run it on the state, put its output under
         `key`, pass the other keys through unchanged. State-threading is composition, not a
@@ -157,18 +153,6 @@ class _Seq(Flow[Any, Any]):
         la, lout = self._left._build(ctx, entry)
         ra, rout = self._right._build(ctx, lout)
         return [*la, *ra], rout
-
-
-class _Par(Flow[Any, Any]):
-    def __init__(self, left: Flow[Any, Any], right: Flow[Any, Any]) -> None:
-        self._left = left
-        self._right = right
-
-    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
-        la, lout = self._left._build(ctx, entry)
-        ra, rout = self._right._build(ctx, entry)
-        out = ctx.fresh("par")
-        return [*la, *ra, _gather_node(out, [lout, rout], out)], out
 
 
 class _Into(Flow[dict, dict]):

@@ -1,7 +1,7 @@
 """N-ary parallel: gather fans one input to many same-typed branches and lists the results.
 
-Where * pairs two branches into a tuple, gather takes a variable number of Flow[A, B] and
-yields Flow[A, list[B]], the shape voting (P3/P4) and mixture-of-agents (P7) need. The
+gather takes a variable number of Flow[A, B] and runs them on the same input, yielding
+Flow[A, list[B]], the shape voting (P3/P4) and mixture-of-agents (P7) need. The
 reducer is an ordinary next action over the list, so the type makes the join mandatory.
 """
 
