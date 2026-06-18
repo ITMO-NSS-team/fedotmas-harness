@@ -12,6 +12,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, model_validator
 
+from fedotmas.engine.contract import View
+from fedotmas.sdk._inject import bind_pred
+
 
 def _pick(state: Any, key: str) -> Any:
     if isinstance(state, dict):
@@ -77,10 +80,13 @@ class Condition(BaseModel):
 
 
 def _as_predicate(
-    until: Callable[[Any], bool] | Condition | str,
-) -> Callable[[Any], bool]:
+    until: Callable[[Any], bool] | Callable[[Any, View], bool] | Condition | str,
+) -> Callable[[Any, View], bool]:
+    """Fold the accepted spellings of a stop condition into one `(state, view) -> bool`. A
+    str is a truthy Condition over that key; a Condition checks the state; a callable may take
+    the state alone or the state and the view."""
     if isinstance(until, str):
         until = Condition(key=until)
     if isinstance(until, Condition):
-        return until.check
-    return until
+        return lambda state, view: until.check(state)
+    return bind_pred(until)

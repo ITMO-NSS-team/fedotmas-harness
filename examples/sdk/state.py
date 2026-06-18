@@ -34,12 +34,14 @@ async def main() -> None:
         {"ticket": "double charge"},
         llm=FakeLLM(lambda p, content: f"noted({content})"),
     )
-    assert run.ok and run.reason == "goal", (run.reason, run.errors)
-    assert run.value == {
+    # .unwrap() returns the value or raises RunError; the escalation when a failed run
+    # should be an exception rather than a None to branch on.
+    value = run.unwrap()
+    assert value == {
         "ticket": "double charge",
         "summary": "noted(Ticket: double charge)",
-    }, run.value
-    print(".into + template:", run.value)
+    }, value
+    print(".into + template:", value)
 
     # .merge() + branch by state key + loop until state key: a two-hop handoff.
     hop = agent(

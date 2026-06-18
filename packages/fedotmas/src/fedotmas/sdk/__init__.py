@@ -12,7 +12,7 @@ also works if you prefer explicit provenance.
 
 from fedotmas.sdk.atoms import LLM, action, agent
 from fedotmas.sdk.blackboard import Board, Rule, blackboard
-from fedotmas.sdk.flow import Condition, Flow, Outcome, branch, gather, nest
+from fedotmas.sdk.flow import Condition, Flow, Outcome, RunError, branch, gather, nest
 
 __all__ = [
     "LLM",
@@ -20,6 +20,7 @@ __all__ = [
     "Condition",
     "Flow",
     "Outcome",
+    "RunError",
     "Rule",
     "action",
     "agent",

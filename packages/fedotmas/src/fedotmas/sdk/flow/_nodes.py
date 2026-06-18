@@ -105,7 +105,7 @@ def _loop_iterate_node(
     body_out: str,
     entry: str,
     state: str,
-    until: Callable[[Any], bool],
+    until: Callable[[Any, View], bool],
     round_term: Terminate,
 ) -> Node:
     """One round per firing: feed the latest state (the entry fact on round one) into the
@@ -129,13 +129,13 @@ def _loop_iterate_node(
         seen = view.query(f"{state}:*")
         if not seen:
             return view.exists(entry) if entry else True
-        return not until(seen[-1].value)
+        return not until(seen[-1].value, view)
 
     return as_node(invoke, name=f"{name}:iter", reads=f"{state}:*", trigger=trigger)
 
 
 def _loop_finish_node(
-    name: str, state: str, out: str, until: Callable[[Any], bool]
+    name: str, state: str, out: str, until: Callable[[Any, View], bool]
 ) -> Node:
     """Copy the final state version to the loop's output once `until` clears; fires once,
     guarded by the output not existing yet."""
@@ -145,6 +145,6 @@ def _loop_finish_node(
 
     def trigger(view: View) -> bool:
         seen = view.query(f"{state}:*")
-        return bool(seen) and until(seen[-1].value) and not view.exists(out)
+        return bool(seen) and until(seen[-1].value, view) and not view.exists(out)
 
     return as_node(invoke, name=f"{name}:done", reads=f"{state}:*", trigger=trigger)

@@ -36,11 +36,17 @@ from fedotmas.engine.report import StepReport
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
 from fedotmas.engine.terminate import Budget, Goal, Terminate
+from fedotmas.sdk._inject import bind_async
 from fedotmas.sdk._template import render
 from fedotmas.sdk.atoms import LLM
 from fedotmas.sdk.flow._outcome import Outcome
 
-StepFn = Callable[[Any, View], Awaitable[Any]]
+# A rule's code body of either arity: `async (input)` or `async (input, view)`. The union keeps
+# both forms typed; _inject.bind_async adapts the one-arg form to the (input, view) contract.
+StepFn = Callable[[Any], Awaitable[Any]] | Callable[[Any, View], Awaitable[Any]]
+_BoundFn = Callable[
+    [Any, View], Awaitable[Any]
+]  # the adapted body, always (input, view)
 When = Callable[[View], bool]
 
 
@@ -48,8 +54,9 @@ When = Callable[[View], bool]
 class Rule:
     """One self-activating blackboard node. When its condition holds, run the step and write
     the result to the `writes` fact; `reads` names the fact fed to the step as input (empty
-    means none). The step is `fn` (code) or `prompt` (an LLM call over the seam; `input` is
-    the template for what the model sees, `returns` its output type) -- exactly one of the
+    means none). The step is `fn` (code, `async (input)` or `async (input, view)` -- the
+    trailing view is optional) or `prompt` (an LLM call over the seam; `input` is the template
+    for what the model sees, `returns` its output type) -- exactly one of the
     two. `when` defaults to produce-once, fire when `reads` exists and `writes` does not yet,
     so a pipeline rule needs no trigger; supply `when` for opportunistic activation, as a
     sequence of tags that must all exist (`"!tag"` for must-not-exist) or, past presence
@@ -122,7 +129,7 @@ def _identity(r: Rule, need: list[str]) -> str:
     return " ".join(tags)
 
 
-def _prompt_fn(r: Rule, llm: LLM) -> StepFn:
+def _prompt_fn(r: Rule, llm: LLM) -> _BoundFn:
     name, prompt, template, returns = r.name, r.prompt, r.input, r.returns
     assert prompt is not None
 
@@ -135,7 +142,7 @@ def _prompt_fn(r: Rule, llm: LLM) -> StepFn:
 
 def _rule_node(r: Rule, default_llm: LLM | None) -> Node:
     if r.fn is not None:
-        fn = r.fn
+        fn = bind_async(r.fn)
     else:
         llm = r.llm or default_llm
         if llm is None:

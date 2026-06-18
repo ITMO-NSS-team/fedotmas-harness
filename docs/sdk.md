@@ -43,21 +43,20 @@ type of each stage has to match the input type of the next, and that is the whol
 import asyncio
 
 from fedotmas.sdk import action
-from fedotmas.engine import View
 
 
 @action
-async def research(topic: str, view: View) -> str:
+async def research(topic: str) -> str:
     return f"facts about {topic}"
 
 
 @action
-async def write(facts: str, view: View) -> str:
+async def write(facts: str) -> str:
     return f"draft from {facts}"
 
 
 @action
-async def edit(draft: str, view: View) -> str:
+async def edit(draft: str) -> str:
     return f"edited {draft}"
 
 
@@ -98,6 +97,7 @@ run.reason   # "goal" | "error" | "budget" | "stalled"
 run.errors   # error facts from failed nodes, [] when clean
 run.steps    # the full StepReport trace
 run.view     # the final snapshot
+run.unwrap() # the value, or raise RunError if the run did not finish clean
 ```
 
 `reason` is worth reading on every failure. `"error"` means a node failed and `errors` names
@@ -130,13 +130,16 @@ engine's universal unit is the `Node`, and both atoms compile to nodes. Both ret
 `action` lifts a python function. The body is the behavior.
 
 ```python
+# ActionFn[A, B] = Callable[[A], Awaitable[B]] | Callable[[A, View], Awaitable[B]]
 def action(fn: ActionFn[A, B], *, name: str | None = None) -> Flow[A, B]: ...
 ```
 
-The function has the signature `async (input: A, view: View) -> B`. The first argument is the
-value flowing in, already unwrapped from its fact, typed as `A`. The return value, typed `B`,
-becomes the arrow's output. `view` is the read-only snapshot of the whole store, there if a
-stage needs to look at something beyond its direct input, ignorable otherwise. The types on the
+The function has the signature `async (input: A) -> B`, or `async (input: A, view: View) -> B`
+when it needs the store. The first argument is the value flowing in, already unwrapped from its
+fact, typed as `A`. The return value, typed `B`, becomes the arrow's output. `view` is the
+read-only snapshot of the whole store, there if a stage needs to look at something beyond its
+direct input; the trailing argument is optional and supplied only when you declare it, so a body
+that ignores the store just omits it. The types on the
 signature are the types of the arrow, so write them honestly rather than reaching for `Any`:
 `research` above is a `Flow[str, str]`, and that annotation is what makes the composition
 checkable. `name` overrides the function's `__name__` in traces and error tags; pass it when
@@ -301,7 +304,7 @@ from fedotmas.sdk import action, gather
 
 
 @action
-async def solver_a(q: str, view: View) -> str:
+async def solver_a(q: str) -> str:
     return "42"
 
 
@@ -309,7 +312,7 @@ async def solver_a(q: str, view: View) -> str:
 
 
 @action
-async def majority(answers: list[str], view: View) -> str:
+async def majority(answers: list[str]) -> str:
     return Counter(answers).most_common(1)[0][0]
 
 
@@ -336,14 +339,14 @@ mandatory by type: a bare `gather` is not yet a usable value, it is a list waiti
 
 ```python
 def branch(
-    select: Callable[[A], str] | str | Flow[A, str],
+    select: Callable[[A], str] | Callable[[A, View], str] | str | Flow[A, str],
     cases: dict[str, Flow[A, B]],
 ) -> Flow[A, B]: ...
 ```
 
-`select` picks the key: a callable over the input, a state key (`branch("station", ...)`
-routes by `state["station"]`, the declarative form), or a label-producing agent flow when the choice
-itself needs a model. Only the case under that key is fed an input fact, so only its
+`select` picks the key: a callable over the input (optionally over the input and the view), a
+state key (`branch("station", ...)` routes by `state["station"]`, the declarative form), or a
+label-producing agent flow when the choice itself needs a model. Only the case under that key is fed an input fact, so only its
 sub-flow runs, and every case converges to the one branch output. A label outside `cases`
 fails the route node with the label and the case set in the message. Each case is a full
 `Flow[A, B]`, which means a case can itself be a chain, a parallel block, or another branch.
@@ -393,12 +396,14 @@ clears.
 
 ```python
 def loop(
-    self: Flow[A, A], until: Callable[[A], bool] | Condition | str,
+    self: Flow[A, A],
+    until: Callable[[A], bool] | Callable[[A, View], bool] | Condition | str,
     *, budget: int | None = 100,
 ) -> Flow[A, A]: ...
 ```
 
-`until` reads the state after each round: a callable, a state key (`.loop(until="done")`
+`until` reads the state after each round: a callable (over the state, optionally the state and
+the view), a state key (`.loop(until="done")`
 stops when `state["done"]` is truthy), or a `Condition`, the declarative comparison
 (`Condition(key="rounds_left", op="lte", value=0)`) for conditions a bare key cannot say; the
 ordered ops (`gt`/`lt`/`gte`/`lte`) require a `value=` and a present key, the non-comparing
@@ -419,7 +424,7 @@ THRESHOLD = 3
 
 
 @action
-async def revise(draft: dict, view: View) -> dict:
+async def revise(draft: dict) -> dict:
     n = draft["v"] + 1
     return {"v": n, "quality": n}
 
@@ -450,13 +455,13 @@ so the loop does not care how complex one iteration is.
 
 ```python
 @action
-async def generate(prev: dict, view: View) -> dict:
+async def generate(prev: dict) -> dict:
     n = prev["n"] + 1
     return {"n": n, "quality": n}
 
 
 @action
-async def critique(draft: dict, view: View) -> dict:
+async def critique(draft: dict) -> dict:
     return {**draft, "approved": draft["quality"] >= THRESHOLD}
 
 
@@ -676,7 +681,8 @@ the seam between them.
 | `sdk.nest`                   | run a whole sub-system (`Board`, `System`, or `Flow`) as one typed node; `budget=` caps its inner run |
 | `Flow.system`                | compile to a runnable `System`, given `entry`/`out` tags and a default `llm` |
 | `Flow.run` / `Flow.stream`   | compile and execute on one input; returns `Outcome` / yields `StepReport` |
-| `sdk.Outcome`                | the outcome: `.value`, `.ok`, `.reason`, `.errors`, `.steps` |
+| `sdk.Outcome`                | the outcome: `.value`, `.ok`, `.reason`, `.errors`, `.steps`, `.unwrap()` |
+| `Outcome.unwrap` / `sdk.RunError` | return the value, or raise `RunError` if the run did not finish clean |
 | `sdk.Rule`                   | a self-activating blackboard node, code (`fn`) or prompt (`prompt`/`input`/`returns`), plus `writes`/`reads`, optional `when` (tag sequence, `!` for absent) and `meta` |
 | `sdk.blackboard`             | assemble rules into a `Board`: `.run(seed, goal=...)`, `.stream`, `.system`, default `llm` for prompt rules |
 

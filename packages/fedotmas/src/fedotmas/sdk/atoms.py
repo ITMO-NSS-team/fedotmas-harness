@@ -26,6 +26,7 @@ from typing import Any, Literal, Protocol, TypeVar, overload
 
 from fedotmas.engine.contract import Fact, Node, Result, View
 from fedotmas.engine.node import as_node
+from fedotmas.sdk._inject import bind_async
 from fedotmas.sdk._template import render
 from fedotmas.sdk.flow._algebra import Flow
 from fedotmas.sdk.flow._nodes import _Ctx
@@ -33,10 +34,16 @@ from fedotmas.sdk.flow._nodes import _Ctx
 A = TypeVar("A")
 B = TypeVar("B")
 
-ActionFn = Callable[[A, View], Awaitable[B]]
+# A leaf body of either arity: `async (input)` or `async (input, view)`. The union keeps both
+# forms typed, so A/B (hence Flow[A, B]) are inferred from the signature whichever you write;
+# _inject.bind_async adapts the one-arg form to the engine's (input, view) contract.
+ActionFn = Callable[[A], Awaitable[B]] | Callable[[A, View], Awaitable[B]]
+_BoundFn = Callable[
+    [Any, View], Awaitable[Any]
+]  # the adapted body, always (input, view)
 
 
-def _action_node(name: str, fn: ActionFn[Any, Any], reads: str, out: str) -> Node:
+def _action_node(name: str, fn: _BoundFn, reads: str, out: str) -> Node:
     async def invoke(input: Any, view: View) -> Result:
         value = await fn(view.value(reads) if reads else None, view)
         return Result(writes=[Fact(tag=out, value=value)])
@@ -45,7 +52,7 @@ def _action_node(name: str, fn: ActionFn[Any, Any], reads: str, out: str) -> Nod
 
 
 class _Action(Flow[A, B]):
-    def __init__(self, name: str, fn: ActionFn[A, B]) -> None:
+    def __init__(self, name: str, fn: _BoundFn) -> None:
         self._name = name
         self._fn = fn
 
@@ -55,13 +62,15 @@ class _Action(Flow[A, B]):
 
 
 def action(fn: ActionFn[A, B], *, name: str | None = None) -> Flow[A, B]:
-    """Lift a plain async function (input, view) -> output into a Flow atom. The body is code
-    and the types come from the signature; no model is involved. This is the model-free atom,
-    the same arrow shape an agent has but mechanical, so the two compose without distinction.
-    `name` overrides the function's __name__ in traces and error tags; pass it when lifting a
-    lambda, which otherwise shows up as <lambda>.
+    """Lift a plain async function into a Flow atom. The body is code and the types come from
+    the signature; no model is involved. This is the model-free atom, the same arrow shape an
+    agent has but mechanical, so the two compose without distinction. The signature is
+    `async (input) -> output`, or `async (input, view) -> output` when the body needs the
+    read-only store; the trailing `view` is optional and supplied only when declared. `name`
+    overrides the function's __name__ in traces and error tags; pass it when lifting a lambda,
+    which otherwise shows up as <lambda>.
     """
-    return _Action(name or getattr(fn, "__name__", "action"), fn)
+    return _Action(name or getattr(fn, "__name__", "action"), bind_async(fn))
 
 
 class LLM(Protocol):

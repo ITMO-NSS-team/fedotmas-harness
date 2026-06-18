@@ -1,6 +1,5 @@
 import asyncio
 
-from fedotmas.engine.contract import View
 from fedotmas.sdk import action, branch
 
 
@@ -13,17 +12,17 @@ def classify(q: str) -> str:
 
 
 @action
-async def solve(q: str, view: View) -> str:
+async def solve(q: str) -> str:
     return f"{q} = 4"
 
 
 @action
-async def write(q: str, view: View) -> str:
+async def write(q: str) -> str:
     return f"prose for {q}"
 
 
 @action
-async def code(q: str, view: View) -> str:
+async def code(q: str) -> str:
     return f"def f(): ...  # {q}"
 
 

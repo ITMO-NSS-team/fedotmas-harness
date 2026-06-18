@@ -1,5 +1,6 @@
 """The arrow surface: combinators, state threading, declarative predicates, nesting."""
 
+import functools
 from typing import Any
 
 import pytest
@@ -9,6 +10,7 @@ from fedotmas.engine import Fact, Goal, ReactiveExecutor, Store, View
 from fedotmas.sdk import (
     Condition,
     Rule,
+    RunError,
     action,
     agent,
     blackboard,
@@ -207,6 +209,51 @@ async def test_action_name_shows_in_the_trace():
 async def test_outcome_repr_is_compact():
     run = await action(echo).run("hi")
     assert repr(run) == "Outcome(ok=True, reason='goal', value='hi')"
+
+
+async def test_action_view_arg_is_optional():
+    async def one_arg(x):
+        return x * 2
+
+    run = await action(one_arg).run(3)
+    assert run.value == 6
+
+
+async def test_action_lifts_an_unintrospectable_callable():
+    async def add(a, b):
+        return a + b
+
+    run = await action(functools.partial(add, "pre-")).run("x")
+    assert run.value == "pre-x"
+
+
+async def test_branch_callable_selector_may_take_view():
+    flow = branch(
+        lambda n, view: "seen" if view.exists("in") else "blind",
+        {"seen": action(double), "blind": action(triple)},
+    )
+    assert (await flow.run(2)).value == 4
+
+
+async def test_loop_until_callable_may_take_view():
+    async def inc(n):
+        return n + 1
+
+    run = await action(inc).loop(lambda n, view: n >= 2).run(0)
+    assert run.value == 2
+
+
+async def test_unwrap_returns_value_on_success():
+    assert (await action(echo).run("hi")).unwrap() == "hi"
+
+
+async def test_unwrap_raises_run_error_naming_the_reason():
+    async def bad(x):
+        return x["missing"]
+
+    run = await action(bad).run({"a": 1})
+    with pytest.raises(RunError, match="reason='error'"):
+        run.unwrap()
 
 
 async def test_nest_runs_a_flow_as_one_node():

@@ -17,6 +17,7 @@ from fedotmas.engine.report import StepReport
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
 from fedotmas.engine.terminate import Budget, Goal, Terminate, any_of
+from fedotmas.sdk._inject import bind_pred
 from fedotmas.sdk.flow._condition import Condition, _as_predicate, _pick
 from fedotmas.sdk.flow._nodes import (
     _alias_node,
@@ -132,15 +133,16 @@ class Flow(Generic[A, B]):
 
     def loop(
         self: Flow[A, A],
-        until: Callable[[A], bool] | Condition | str,
+        until: Callable[[A], bool] | Callable[[A, View], bool] | Condition | str,
         *,
         budget: int | None = 100,
     ) -> Flow[A, A]:
         """Iterate the flow, feeding each round's output in as the next round's input, until
-        `until` clears. `until` is a callable over the state, a Condition, or a state key (stop
-        when state[key] is truthy). Each round runs the body in its own inner store as one
-        outer superstep, so rounds are capped by the outer budget but a round itself is not;
-        `budget` caps the supersteps inside one round (default 100, None lifts it)."""
+        `until` clears. `until` is a callable over the state (optionally the state and the
+        view), a Condition, or a state key (stop when state[key] is truthy). Each round runs
+        the body in its own inner store as one outer superstep, so rounds are capped by the
+        outer budget but a round itself is not; `budget` caps the supersteps inside one round
+        (default 100, None lifts it)."""
         return _Loop(self, _as_predicate(until), budget)
 
 
@@ -178,7 +180,10 @@ class _Merge(Flow[dict, dict]):
 
 class _Loop(Flow[Any, Any]):
     def __init__(
-        self, body: Flow[Any, Any], until: Callable[[Any], bool], budget: int | None
+        self,
+        body: Flow[Any, Any],
+        until: Callable[[Any, View], bool],
+        budget: int | None,
     ) -> None:
         self._body = body
         self._until = until
@@ -204,7 +209,7 @@ class _Loop(Flow[Any, Any]):
 class _Branch(Flow[Any, Any]):
     def __init__(
         self,
-        select: Flow[Any, Any] | Callable[[Any], str],
+        select: Flow[Any, Any] | Callable[[Any, View], str],
         cases: dict[str, Flow[Any, Any]],
     ) -> None:
         self._select = select
@@ -218,7 +223,7 @@ class _Branch(Flow[Any, Any]):
         nodes: list[Node] = []
 
         label_tag = ""
-        classify: Callable[[Any], str] | None = None
+        classify: Callable[[Any, View], str] | None = None
         if isinstance(select, Flow):
             sel_nodes, label_tag = select._build(ctx, entry)
             nodes.extend(sel_nodes)
@@ -229,7 +234,9 @@ class _Branch(Flow[Any, Any]):
 
         async def route(input: Any, view: View) -> Result:
             value = view.value(entry) if entry else None
-            key = classify(value) if classify is not None else view.value(label_tag)
+            key = (
+                classify(value, view) if classify is not None else view.value(label_tag)
+            )
             if key not in ins:
                 raise ValueError(
                     f"branch {name!r} got label {key!r}, not one of {sorted(ins)}"
@@ -245,17 +252,20 @@ class _Branch(Flow[Any, Any]):
 
 
 def branch(
-    select: Flow[A, str] | Callable[[A], str] | str, cases: dict[str, Flow[A, B]]
+    select: Flow[A, str] | Callable[[A], str] | Callable[[A, View], str] | str,
+    cases: dict[str, Flow[A, B]],
 ) -> Flow[A, B]:
     """Route the input to exactly one case by a label, then merge back to one output. `select`
-    is a python callable A -> label, a state key (route by state[key], the declarative form),
-    or a label-producing flow (an agent with labels=, when the route is the model's choice;
-    an extra router step). All cases share input and output types, so the whole branch stays
-    one typed arrow Flow[A, B].
+    is a python callable A -> label (optionally (A, View) -> label), a state key (route by
+    state[key], the declarative form), or a label-producing flow (an agent with labels=, when
+    the route is the model's choice; an extra router step). All cases share input and output
+    types, so the whole branch stays one typed arrow Flow[A, B].
     """
     if isinstance(select, str):
         key = select
-        select = lambda state: _pick(state, key)  # noqa: E731
+        return _Branch(lambda state, view: _pick(state, key), cases)
+    if not isinstance(select, Flow):
+        return _Branch(bind_pred(select), cases)
     return _Branch(select, cases)
 
 

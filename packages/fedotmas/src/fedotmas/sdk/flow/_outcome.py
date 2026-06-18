@@ -9,6 +9,12 @@ from fedotmas.engine.contract import Fact, Status, View
 from fedotmas.engine.report import Run, StepReport
 
 
+class RunError(RuntimeError):
+    """Raised by Outcome.unwrap() when a run did not finish clean. Failure stays data on the
+    Outcome (`.reason`, `.errors`); this is the opt-in escalation for call sites that want the
+    value or an exception, not a None to check by hand."""
+
+
 @dataclass
 class Outcome:
     """The outcome of a run surface (Flow.run, Board.run): the engine Run plus the out tag,
@@ -50,6 +56,19 @@ class Outcome:
         if self.run.view.exists(self.out):
             return "goal"
         return "stalled" if self.run.reason == "quiescence" else "budget"
+
+    def unwrap(self) -> Any:
+        """Return the produced value, or raise RunError if the run did not finish clean. The
+        complement to reading `.value`/`.ok` by hand: use it when a failed run should be an
+        exception (a script, a test) rather than a None to branch on. The error names the
+        reason and the failed nodes."""
+        if self.ok:
+            return self.value
+        detail = (
+            "; ".join(f"{e.producer}: {e.value}" for e in self.errors)
+            or "no output produced"
+        )
+        raise RunError(f"run did not succeed (reason={self.reason!r}): {detail}")
 
     def __repr__(self) -> str:
         value = repr(self.value)

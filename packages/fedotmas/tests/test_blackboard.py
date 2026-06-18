@@ -26,6 +26,16 @@ async def mark(value, view):
     return True
 
 
+async def test_rule_fn_view_arg_is_optional():
+    async def one_arg(value):
+        return value + 1
+
+    board = blackboard(Rule("one", fn=one_arg, reads="seed", writes="a"))
+    out = await board.run({"seed": 1}, goal="a")
+    assert out.ok
+    assert out.value == 2
+
+
 async def test_produce_once_chains_without_triggers():
     board = blackboard(
         Rule("one", fn=bump, reads="seed", writes="a"),
