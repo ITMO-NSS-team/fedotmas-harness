@@ -1,5 +1,3 @@
-"""Internal: the JSON Schema exports — the grammar handed to an emitting model."""
-
 from __future__ import annotations
 
 from collections.abc import Iterable

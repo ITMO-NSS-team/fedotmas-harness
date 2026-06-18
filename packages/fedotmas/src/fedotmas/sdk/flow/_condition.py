@@ -1,10 +1,3 @@
-"""Internal: the declarative predicate forms of the arrow surface.
-
-Condition is data, not code: a program that emits systems can express a stop or routing
-condition without writing a callable. _as_predicate folds the three accepted spellings
-(callable, Condition, state key) into one callable.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable

@@ -1,24 +1,3 @@
-"""The atoms: leaf factories that fill a surface, plus the LLM seam they call.
-
-Two kinds of leaf, split by mechanism: action lifts a plain async function (the body is
-code, deterministic, no model), agent lifts a prompt into an LLM node (the body is data).
-The word agent always means LLM-backed here; the engine's unit of execution is the Node,
-which both compile to. Both return a Flow[A, B] and compose with the same operators.
-
-An LLM node is fully declarative: strings, types, and keys. `prompt` is the static system
-prompt. `input` is a template for what the model sees, rendered over the node's input (dict
-keys or model fields) with store tags as fallback, so a stateful node picks what it feeds the
-model without code. `labels` constrains the output to one of a finite label set (a
-classifier, the node shape that drives branch). Putting the reply back into a dict state is
-composition, not a call parameter: `.into(key)` and `.merge()` on the resulting flow thread
-the state, which is what lets the same atoms fill loops, swarms, and chats. None of these
-accept a callable; action is the escape hatch when behavior must be code.
-
-The LLM seam lives here with its only callers. The SDK never imports a provider: a backend is
-injected via `llm` on the node or as the default at .system()/.run(), anything with a
-`complete` method satisfies it, and an unbound node fails at compile time.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
@@ -69,6 +48,12 @@ def action(fn: ActionFn[A, B], *, name: str | None = None) -> Flow[A, B]:
     read-only store; the trailing `view` is optional and supplied only when declared. `name`
     overrides the function's __name__ in traces and error tags; pass it when lifting a lambda,
     which otherwise shows up as <lambda>.
+
+    Example:
+        async def fetch(url: str) -> str:
+            return await client.get(url)
+
+        get = action(fetch)  # Flow[str, str]
     """
     return _Action(name or getattr(fn, "__name__", "action"), bind_async(fn))
 
@@ -177,6 +162,10 @@ def agent(
     `agent(..., takes=dict, returns=...).into("key")` puts the reply under one key,
     `.merge()` folds a structured reply's fields in. The backend binds via `llm` here or via
     the default at .system()/.run(); neither bound fails at compile time.
+
+    Example:
+        draft = agent("draft", prompt="Write a haiku about {topic}.")
+        route = agent("route", prompt="Pick a desk.", labels=["sales", "support"])
     """
     if labels is not None:
         if returns is not str:

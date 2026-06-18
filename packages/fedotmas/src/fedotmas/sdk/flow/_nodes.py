@@ -1,10 +1,3 @@
-"""Internal: the compiled plumbing of the arrow surface.
-
-The compile context that allocates fresh fact tags, the node factories the combinators
-compile to (joins, aliases, the loop's iterate/finish pair), and the guard that surfaces an
-inner run's failure as the wrapping node's error.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable

@@ -1,7 +1,3 @@
-"""Pattern presets: prewired MAS families that a meta-agent (or a person) fills with
-roles. Every preset builds a Flow; data-backed presets also expose the manifest document
-behind it, so the artifact stays patchable data."""
-
 from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable

@@ -1,9 +1,3 @@
-"""Internal: the code-backed blackboard preset.
-
-No coordinator and no document form: rules self-activate over shared state, nest() folds
-the board into one typed Flow so the run surface stays uniform with the data families.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass

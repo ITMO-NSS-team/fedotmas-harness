@@ -31,7 +31,7 @@ on running code.
 The typed SDK surface over the same engine: build atoms with `action`/`agent`, compose them
 with the arrow operators, and run with `flow.run(value)` / `flow.stream(value)` (which return
 an `Outcome` / yield `StepReport`s — no executor wiring by hand). These run with no API key
-(`agent` nodes use a small `FakeLLM` stub). See [`docs/sdk.md`](../docs/sdk.md).
+(`agent` nodes use a small `FakeLLM` stub). See [`docs/flow.md`](../docs/flow.md).
 
 | File | SDK surface shown |
 |---|---|

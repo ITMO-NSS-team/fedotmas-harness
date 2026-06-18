@@ -1,10 +1,3 @@
-"""Internal: the manifest models — the language as data — plus parse and merge.
-
-The JSON value type discriminates the flow forms: a string is a name reference, a list is
-the sequence, an object picks its combinator by characteristic key. No parser of its own:
-validation is pydantic, the grammar is the JSON Schema export.
-"""
-
 from __future__ import annotations
 
 import json

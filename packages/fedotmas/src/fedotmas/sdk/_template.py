@@ -1,10 +1,3 @@
-"""Internal: prompt-template rendering over a node's input and the store.
-
-A template key resolves against the input value first (dict key or model field), then the
-store by tag, with `{input}` standing for the whole incoming value. Shared by the atoms and
-the blackboard rules; not part of the public surface.
-"""
-
 from __future__ import annotations
 
 from typing import Any

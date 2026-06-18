@@ -1,5 +1,3 @@
-"""Internal: the zero-shot pattern pick, itself one constrained sdk agent."""
-
 from __future__ import annotations
 
 from collections.abc import Sequence

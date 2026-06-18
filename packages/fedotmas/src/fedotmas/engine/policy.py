@@ -1,5 +1,3 @@
-"""Ready-set conflict resolution: fire-all, by-priority, auction."""
-
 from __future__ import annotations
 
 from collections.abc import Callable

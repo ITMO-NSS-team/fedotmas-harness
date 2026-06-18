@@ -1,8 +1,3 @@
-"""pydantic-ai as the default LLM backend, wrapped into the LLM protocol.
-
-Gated by the llm extra (pip install fedotmas[llm]).
-"""
-
 from __future__ import annotations
 
 import json

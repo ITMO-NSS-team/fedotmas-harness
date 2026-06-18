@@ -10,7 +10,8 @@ deliberately. The engine does not care whether a node wraps an LLM agent, a plai
 or a whole team; the SDK reserves the word agent for its LLM-backed atom specifically.
 
 Everything else in the framework (the DSL, the pattern presets) is a way to produce input
-for this engine. If you understand the engine, you understand the runtime.
+for this engine. If you understand the engine, you understand the runtime. For the bigger
+picture and how the authoring surfaces relate, see [Concepts](concepts.md).
 
 ## The mental model
 

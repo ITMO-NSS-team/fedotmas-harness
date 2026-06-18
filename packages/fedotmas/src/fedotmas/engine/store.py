@@ -1,11 +1,3 @@
-"""Store: the shared blackboard. Commit facts, snapshot an immutable view, query it.
-
-The store owns the logical clock: `next_step` is one past the highest step ever committed,
-so the step axis is monotonic across runs and mid-run feeders, and re-running an executor
-over the same store cannot collide fact keys. Seeds at step -1 sit before time and do not
-advance it.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Iterable

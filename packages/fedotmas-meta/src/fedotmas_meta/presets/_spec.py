@@ -1,5 +1,3 @@
-"""Internal: role declarations and fill validation shared by every preset."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping

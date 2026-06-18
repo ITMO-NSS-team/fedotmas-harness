@@ -1,5 +1,3 @@
-"""Internal: Outcome, the one object a run surface returns (Flow.run, Board.run)."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass

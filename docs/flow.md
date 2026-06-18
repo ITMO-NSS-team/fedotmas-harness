@@ -1,4 +1,4 @@
-# SDK
+# Flow surface
 
 The SDK is the embedded Python surface for building agent systems by hand. Its primary surface
 is the flow: a typed arrow from one value to another. `Flow[A, B]` is a piece of a multi-agent
@@ -14,25 +14,7 @@ error, not a surprise at step four.
 
 ## The mental model
 
-State in the runtime lives in one shared store as a growing list of tagged facts. Agents
-watch that store, declare when they are ready, run in synchronized rounds, and write new
-facts back. A flow never asks you to think about any of that. You write plain typed
-functions and stitch them with operators.
-
-A flow is **lazy**. Building `a + b` allocates nothing. The arrow is a recipe. It turns into
-real agents and real fact tags only when you call `.system(entry, out)`, which hands you the
-bag of agents the runtime executes. The same flow can be compiled more than once, reused, or
-nested inside a larger flow, because it bakes in no concrete tags until that moment.
-
-So there are two languages in play. The arrow language is what you write, and it comes in three
-forms that follow the shape of each operation. One binary combinator is an infix operator, `+`
-(sequence). Transforms of a flow you already have are methods: `.loop`,
-`.into`, `.merge`. The rest build a flow from several flows or a whole system, so they are
-plain functions: `gather` (parallel), `branch`, `nest`. The dividing line is simple: you
-either do more to a flow you have (operator or method) or assemble a new one from parts
-(function). The fact-and-agent language is what it compiles to. Most of this page is the arrow
-language, with the compiled trace shown alongside so you can see the seam; the atoms that fill
-the arrows and the blackboard surface for shapeless work come after.
+See [Concepts](concepts.md) for the shared model (store, facts, supersteps) and how the flow surface relates to the blackboard. This page is the flow surface itself: the atoms, the operators, and the compiled trace beside each.
 
 ## A first flow
 
@@ -475,8 +457,9 @@ The difference is entirely in what you put inside the loop, never in the loop it
 
 Not every part of a system is a tidy arrow. Some work is opportunistic: a set of rules that
 fire whenever the store happens to satisfy them, in no fixed order, converging on a goal. That
-is the blackboard surface, written with `rule` and `blackboard`, and it does not have a single
-`A -> B` shape to type. `nest` is how such a sub-system enters the arrow world as one node.
+is the [blackboard surface](blackboard.md), written with `rule` and `blackboard`, and it does
+not have a single `A -> B` shape to type. `nest` is how such a sub-system enters the arrow
+world as one node.
 
 ```python
 def nest(
@@ -530,140 +513,6 @@ checker cannot infer the boundary types. You annotate them yourself
 checker uses to verify the stitch on either side. Feed a `str` into a flow built around a
 `Flow[list[str], str]` nest and the mismatch is caught.
 
-## Why the types
-
-Everything above leans on one idea. The runtime values are `Any` at execution time; the types
-live only at design time, checked by `ty` (or mypy) before you run. They buy correctness by
-construction. An unreduced `gather` is a `list` with nowhere to go that the next stage must
-consume, a loop over a non-state-preserving body is a receiver
-that does not match `Flow[A, A]`. Each of these is a static error at the line you wrote,
-rather than a wrong fact discovered mid-run.
-
-The payoff scales past hand-written systems. A typed Python arrow algebra is a small, prunable
-search space and a far better target for a program that generates systems than a freeform
-diagram. The same property that catches your mistake prunes a generator's.
-
-## The blackboard surface
-
-Not every system is an arrow. When activation is opportunistic, when agents fire in no fixed
-order as the store happens to satisfy them, there is no `A -> B` shape to type. For that the SDK
-has a second surface: the blackboard.
-
-A rule is a self-activating node: a condition paired with a step. The step is code (`fn`) or,
-like the agent atom, a prompt: `prompt` plus an optional `input` template rendered over the
-rule's input with store tags as fallback, exactly one of the two. For the common produce-once
-shape the condition is derived from `reads` and `writes` (fire when the read fact is present
-and the written one is not yet), so a pipeline rule needs no trigger. You write `when` only
-when activation is genuinely opportunistic, several rules contending on one fact, or a
-condition over more than one read. Its declarative form is a list of fact tags that must all
-exist, with a `!` prefix for a fact that must be absent; a callable over the `View` is the
-escape hatch for conditions beyond presence. `reads` names the one fact fed to the step as
-its input; a rule over several facts conditions on them with `when` and reads them off the
-view (or pulls them into an `input` template by tag).
-
-```python
-@dataclass
-class Rule:
-    name: str
-    fn: StepFn | None = None                       # code step...
-    writes: str = ""
-    reads: str = ""
-    when: Callable[[View], bool] | Sequence[str] | None = None   # defaults to produce-once
-    meta: dict = field(default_factory=dict)       # rides to the agent, e.g. an auction bid
-    prompt: str | None = None                      # ...or a prompt step over the LLM seam
-    input: str | None = None                       # template for what the model sees
-    returns: Any = str                             # the prompt step's output type
-    llm: LLM | None = None                         # per-rule backend override
-
-
-def blackboard(*rules: Rule, llm: LLM | None = None) -> Board: ...
-```
-
-`blackboard` assembles rules into a `Board`, and `llm` is the default backend for prompt rules
-that did not bind their own (a prompt rule with no backend from either level fails here, by
-name). A board runs symmetrically with a flow: `board.run(seed, goal=...)` takes the seed
-facts as a tag -> value dict and the tag to read the result back from, and returns the same
-`Outcome`; `board.stream` is the same run yielded step by step. An `llm` passed at
-`board.run(...)` is the last-resort backend, behind the board default and the per-rule
-binding, and `halt_on_error=False` works the same as on `Flow.run`. `board.system` is the
-raw engine `System` when you want executor-level control. A
-linear investigation is prompts all the way down and writes no triggers:
-
-```python
-from fedotmas.sdk import Rule, blackboard
-
-investigation = blackboard(
-    Rule("hypothesizer", prompt="Propose one testable hypothesis.", reads="question", writes="hypothesis"),
-    Rule("researcher",   prompt="State one supporting piece of evidence.", reads="hypothesis", writes="evidence"),
-    Rule("verifier",     prompt="Weigh and conclude in one line.", reads="evidence", writes="conclusion"),
-    llm=some_llm,
-)
-
-run = await investigation.run({"question": "what is it?"}, goal="conclusion")
-```
-
-Because a rule's `input` template falls back to store tags, a rule that weighs several facts
-at once stays declarative: `input="Evidence: {evidence}\nObjection: {objection}"` pulls both
-straight off the blackboard.
-
-```
-step 0: ['hypothesizer'] -> ['hypothesis']
-step 1: ['researcher'] -> ['evidence']
-step 2: ['verifier'] -> ['conclusion']
-conclusion: X confirmed
-```
-
-That reads like a chain, because it is one. The surface earns its keep when activation is not
-linear. Here `researcher` and `skeptic` both wake on the same hypothesis and run together, and
-`verifier` waits on two independent facts at once, a condition no single read expresses, so it
-spells out `when`:
-
-```python
-blackboard(
-    Rule("hypothesizer", hypothesize, writes="hypothesis", reads="question"),
-    Rule("researcher",   research,    writes="evidence",   reads="hypothesis"),
-    Rule("skeptic",      doubt,       writes="objection",  reads="hypothesis"),
-    Rule("verifier",     verify,      writes="conclusion", reads="evidence",
-         when=["evidence", "objection", "!conclusion"]),
-)
-```
-
-```
-step 0: ['hypothesizer'] -> ['hypothesis']
-step 1: ['researcher', 'skeptic'] -> ['evidence', 'objection']
-step 2: ['verifier'] -> ['conclusion']
-```
-
-One invariant to know: a rule re-fires per new version of the facts it names. The engine is
-edge-triggered, firing a node at most once per distinct set of facts matched by `reads` plus
-the positive `when` tags, so a fresh `evidence` re-arms `verifier` above. A rule with a
-callable `when` and no `reads` names no facts and fires at most once per run; give it `reads`
-if it is meant to wake again.
-
-The order fell out of the facts, not a wiring. Inside a blackboard there are no arrow types and
-so no static check; that is the price of an open shape, and the reason to keep blackboards for
-work that genuinely has no fixed topology. To use a goal-terminating blackboard as one node in a
-flow, wrap it with `nest`.
-
-A rule also carries `meta`, a dict that rides to the node and reads back as
-`node.describe().meta`. A `Policy` uses it to choose a winner without a side table, which is how
-contract-net puts the bid on the bidder: `AuctionSelect(key=lambda n, v: n.describe().meta["bid"])`.
-
-## When a flow is the wrong shape
-
-A flow is the right tool when the topology is known when you write it: a chain, a fan-out, a
-router, a refinement loop. It is the dataflow subset of what the runtime can do, and within
-that subset it gives you static checking the raw runtime cannot.
-
-Some systems do not have a fixed topology. The width is decided at runtime, the next speaker is
-chosen by a manager, work is handed off dynamically, a task is auctioned to the best bidder.
-Those are not arrows. They live on the blackboard surface (authored triggers, optionally a
-runtime policy that picks who fires), where there is no shape to derive and so nothing to type.
-Forcing them into an arrow would be a category error. When such a system does converge on a goal,
-`nest` brings its result back across the boundary as a single typed node. Reach for a flow
-where the shape is fixed, reach for the blackboard where order is emergent, and let `nest` be
-the seam between them.
-
 ## Reference
 
 | Import                       | What it is                                                   |
@@ -683,8 +532,6 @@ the seam between them.
 | `Flow.run` / `Flow.stream`   | compile and execute on one input; returns `Outcome` / yields `StepReport` |
 | `sdk.Outcome`                | the outcome: `.value`, `.ok`, `.reason`, `.errors`, `.steps`, `.unwrap()` |
 | `Outcome.unwrap` / `sdk.RunError` | return the value, or raise `RunError` if the run did not finish clean |
-| `sdk.Rule`                   | a self-activating blackboard node, code (`fn`) or prompt (`prompt`/`input`/`returns`), plus `writes`/`reads`, optional `when` (tag sequence, `!` for absent) and `meta` |
-| `sdk.blackboard`             | assemble rules into a `Board`: `.run(seed, goal=...)`, `.stream`, `.system`, default `llm` for prompt rules |
 
 Everything above re-exports from `fedotmas.sdk`. Two surfaces (`flow`, `blackboard`) filled by
 two atoms (`action` is code, `agent` is a model call). Flat imports are safe, no name shadows
@@ -709,5 +556,4 @@ Things to keep in mind:
 - `+` and `.loop` enforce their stitch crisply. `branch` is looser, keep its cases homogeneous.
 - The join is never a special operator. A `gather` list is consumed by an ordinary next stage,
   and the type makes that consumption mandatory.
-- Use a flow where the topology is fixed. Use the blackboard where order is emergent, and `nest`
   to carry an emergent sub-system back into the arrow world.

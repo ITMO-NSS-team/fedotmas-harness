@@ -1,16 +1,3 @@
-"""Internal: arity adaptation, so a user callable may omit the trailing `view`.
-
-A leaf body or a selector is contracted as `(input, view)` -- the input first, the read-only
-store second. But `view` is unused in most leaves, so dragging it through every signature is
-boilerplate. These adapters let a one-argument `(input)` form work too: the signature is
-inspected once at compile time and, when `view` is not wanted, a wrapper supplies it. A
-callable that cannot be introspected (a C builtin) is assumed to take the full contract, so the
-behavior never silently changes under it.
-
-Not part of the public surface; shared by the atoms, the blackboard rules, and the flow
-selectors (branch, loop).
-"""
-
 from __future__ import annotations
 
 import inspect

@@ -1,10 +1,3 @@
-"""Termination conditions: goal, quiescence, budget.
-
-The shipped conditions compose with `&` and `|`. A Terminate you implement yourself satisfies
-the protocol but has no operators; combine it with all_of / any_of, which accept anything
-matching the protocol.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable

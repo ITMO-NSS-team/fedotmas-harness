@@ -1,10 +1,3 @@
-"""Node contract: the Protocol and message types (Result, Card, Fact, Status, View).
-
-The unit of execution is a Node, not an "agent": the engine does not care whether a node
-wraps an LLM agent, a plain function, or a whole sub-system, and the SDK reserves the word
-agent for the LLM-backed atom specifically.
-"""
-
 from __future__ import annotations
 
 from enum import Enum

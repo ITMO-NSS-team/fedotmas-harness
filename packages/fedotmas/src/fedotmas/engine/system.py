@@ -1,5 +1,3 @@
-"""System: the compiled set of nodes. Produced by the SDK surfaces, run by an executor."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass

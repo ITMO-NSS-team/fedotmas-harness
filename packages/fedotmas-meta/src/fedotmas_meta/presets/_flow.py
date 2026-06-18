@@ -1,10 +1,3 @@
-"""Internal: the data-backed families, each a manifest skeleton with role slots.
-
-The manifest is the artifact: build() is compile(manifest(fill)) with the preset's wiring
-atoms (lift to dict state, log, emit) supplied at the call. Roles fill prompts only; the
-wiring never changes.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Callable

@@ -1,10 +1,3 @@
-"""Internal: Flow and the combinators, the operator algebra of the arrow surface.
-
-Flow and its combinator subclasses are mutually recursive (Flow methods build _Seq/_Loop,
-which subclass Flow), so they live together. Each combinator's _build compiles to
-nodes via the factories in _nodes.
-"""
-
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
@@ -142,7 +135,12 @@ class Flow(Generic[A, B]):
         view), a Condition, or a state key (stop when state[key] is truthy). Each round runs
         the body in its own inner store as one outer superstep, so rounds are capped by the
         outer budget but a round itself is not; `budget` caps the supersteps inside one round
-        (default 100, None lifts it)."""
+        (default 100, None lifts it).
+
+        Example:
+            revise.loop(until="approved")  # stop when state["approved"] is truthy
+            revise.loop(until=lambda s: s["score"] >= 0.9)
+        """
         return _Loop(self, _as_predicate(until), budget)
 
 
@@ -260,6 +258,10 @@ def branch(
     state[key], the declarative form), or a label-producing flow (an agent with labels=, when
     the route is the model's choice; an extra router step). All cases share input and output
     types, so the whole branch stays one typed arrow Flow[A, B].
+
+    Example:
+        kind = agent("kind", prompt="Classify the issue.", labels=["bug", "feature"])
+        branch(kind, {"bug": triage, "feature": plan})
     """
     if isinstance(select, str):
         key = select
@@ -288,6 +290,9 @@ def gather(*flows: Flow[A, B]) -> Flow[A, list[B]]:
     """Run several flows on the same input in parallel and collect their outputs into a list,
     joined when all complete. The n-ary form of *; follow it with a reducer (e.g. + majority)
     to fold the list into one value. Matches the dsl `gather` form.
+
+    Example:
+        gather(solver_a, solver_b, solver_c) + majority  # self-consistency vote
     """
     if not flows:
         raise ValueError("gather needs at least one flow")
@@ -358,5 +363,9 @@ def nest(
     the failure surfaces as this node's error fact; the outer halt_on_error then decides
     whether the rest of the system continues. Named nest, not embed, to avoid the embeddings
     reading.
+
+    Example:
+        research = nest(board, entry="topic", out="report", until=Goal("report"))
+        pipeline = plan + research + write
     """
     return _Nest(target, entry=entry, out=out, until=until, budget=budget)

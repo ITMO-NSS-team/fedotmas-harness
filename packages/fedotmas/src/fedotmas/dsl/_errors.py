@@ -1,5 +1,3 @@
-"""Internal: the error contract — every failure stage speaks (path, message, expected)."""
-
 from __future__ import annotations
 
 from pydantic import BaseModel, ValidationError

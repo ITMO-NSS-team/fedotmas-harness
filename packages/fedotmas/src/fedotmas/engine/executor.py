@@ -1,5 +1,3 @@
-"""The engine: Executor protocol and ReactiveExecutor, the single superstep (BSP) loop."""
-
 from __future__ import annotations
 
 import asyncio

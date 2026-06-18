@@ -1,10 +1,3 @@
-"""Internal: the compiler, Manifest -> Flow. The only module that knows the sdk atoms.
-
-A string resolves in the shared node/flow namespace (node reference or named-flow splice);
-the other productions map 1:1 to sdk combinators. Every issue is collected against its path
-and raised as one ManifestError; a Flow comes back only from a clean document.
-"""
-
 from __future__ import annotations
 
 from typing import Any

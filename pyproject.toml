@@ -6,6 +6,9 @@ dev = [
   "ruff>=0.15.16",
   "ty>=0.0.44",
 ]
+docs = [
+  "mkdocs-material>=9.7.6",
+]
 bench = [
   "datasets<4",
   "deepeval>=4.0.6",

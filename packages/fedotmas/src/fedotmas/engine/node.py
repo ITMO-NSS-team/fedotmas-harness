@@ -1,5 +1,3 @@
-"""as_node: wrap an async function into a Node, the engine's unit of execution."""
-
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable

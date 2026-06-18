@@ -1,10 +1,3 @@
-"""Core engine: blackboard store and the reactive superstep executor.
-
-The whole engine vocabulary re-exported flat, so application code writes
-`from fedotmas.engine import Fact, System, ReactiveExecutor, Goal` instead of reaching into
-the submodules.
-"""
-
 from fedotmas.engine.contract import Card, Fact, Node, Result, Status, View
 from fedotmas.engine.executor import Executor, ReactiveExecutor
 from fedotmas.engine.node import as_node

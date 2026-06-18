@@ -1,27 +1,3 @@
-"""The blackboard surface: opportunistic, non-topological activation.
-
-A rule is a node that activates itself: when its condition holds against the shared store, it
-fires and posts its result as a fact. That is what arrows cannot express, agents firing in no
-order anyone wired, and it makes this surface a peer of the flows, not sugar over them. The
-step inside a rule is either code (`fn`) or, like the agent atom, a prompt: `prompt` plus an
-optional `input` template rendered over the rule's input with store tags as fallback, so a
-rule that reads several facts at once stays declarative. For the common produce-once shape
-the condition is derived from reads and writes, so a linear rule needs no trigger; write
-`when` only when the activation is genuinely opportunistic (several rules contending on the
-same fact, conditions not reducible to a single read). The declarative form of `when` is a
-sequence of fact tags, all of which must exist, with a `!` prefix for must-not-exist; a
-callable over the View is the escape hatch beyond presence tests.
-
-Re-fire identity comes from the facts a rule names: the engine fires a rule at most once per
-distinct set of facts matched by `reads` plus the positive `when` tags, so a new version of
-any of them re-arms the rule. A rule with a callable `when` and no `reads` names no facts and
-fires at most once per run.
-
-blackboard(...) assembles rules into a Board: run it with board.run(seed, goal=...), stream
-the trace with board.stream, hand board.system to an engine executor for full control, or
-wrap it with nest to drop the whole board into a flow as one typed node.
-"""
-
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
@@ -232,6 +208,12 @@ def blackboard(*rules: Rule, llm: LLM | None = None) -> Board:
     no fixed topology. `llm` is the default backend for prompt rules that did not bind their
     own. Run it with board.run(seed, goal=...), drop to board.system for the raw engine, or
     wrap the board with nest to make it one typed node of a flow.
+
+    Example:
+        draft = Rule(name="draft", reads="topic", writes="draft", prompt="Draft it.")
+        check = Rule(name="check", reads="draft", writes="report", prompt="Review it.")
+        board = blackboard(draft, check)
+        out = await board.run({"topic": "tea"}, goal="report")
     """
     for r in rules:
         _check(r)
