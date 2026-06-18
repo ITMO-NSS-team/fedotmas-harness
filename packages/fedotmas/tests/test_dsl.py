@@ -4,8 +4,6 @@ import json
 from typing import Any
 
 import pytest
-from pydantic import BaseModel
-
 from fedotmas.dsl import (
     Manifest,
     ManifestError,
@@ -17,6 +15,7 @@ from fedotmas.dsl import (
 )
 from fedotmas.engine import View
 from fedotmas.sdk import action
+from pydantic import BaseModel
 
 
 class FakeLLM:

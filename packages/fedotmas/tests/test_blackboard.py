@@ -3,7 +3,6 @@
 from typing import Any
 
 import pytest
-
 from fedotmas.engine import Fact, Goal, ReactiveExecutor, Store, View
 from fedotmas.sdk import Rule, blackboard
 

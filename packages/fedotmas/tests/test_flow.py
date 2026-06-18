@@ -4,8 +4,6 @@ import functools
 from typing import Any
 
 import pytest
-from pydantic import BaseModel
-
 from fedotmas.engine import Fact, Goal, ReactiveExecutor, Store, View
 from fedotmas.sdk import (
     Condition,
@@ -18,6 +16,7 @@ from fedotmas.sdk import (
     gather,
     nest,
 )
+from pydantic import BaseModel
 
 
 class FakeLLM:

@@ -1,7 +1,6 @@
 """Termination conditions: validation, the index axis, operator and function composition."""
 
 import pytest
-
 from fedotmas.engine import (
     Budget,
     Fact,
