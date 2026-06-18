@@ -13,6 +13,9 @@ def _match(tag: str, pattern: str) -> bool:
 
 
 class Snapshot:
+    """A read-only View over the facts as of one moment. Patterns are an exact tag or a `*`
+    prefix glob; get/value return the latest match in insertion order."""
+
     def __init__(self, facts: tuple[Fact, ...]) -> None:
         self._facts = facts
 
@@ -35,6 +38,10 @@ class Snapshot:
 
 
 class Store:
+    """The blackboard: an append-only log of facts plus a monotonic step clock. Writes are
+    never overwritten, so a tag keeps every version and the clock only moves forward; this is
+    what lets the executor fire a node once per distinct input. Reads go through `snapshot`."""
+
     def __init__(self) -> None:
         self._facts: list[Fact] = []
         self._clock = 0

@@ -13,6 +13,10 @@ from fedotmas_meta.presets._spec import Fill, RoleSpec, check_fill
 
 @dataclass(frozen=True)
 class FlowPreset:
+    """A DataPreset whose body is a DSL manifest. `_doc` builds the document from the checked
+    filling, `_atoms` supplies the code nodes it refs, `_reserved` are names the wiring owns
+    that a role filling may not shadow."""
+
     name: str
     hint: str
     roles: tuple[RoleSpec, ...]

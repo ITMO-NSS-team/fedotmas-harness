@@ -21,6 +21,9 @@ __all__ = ["DataPreset", "Fill", "Preset", "RoleSpec", "catalog", "get"]
 
 @runtime_checkable
 class Preset(Protocol):
+    """A pattern family with named role slots. `hint` is the one-liner the selector ranks on,
+    `roles` says which prompts to fill, `build` turns a filling into a runnable Flow."""
+
     @property
     def name(self) -> str: ...
     @property
@@ -32,6 +35,9 @@ class Preset(Protocol):
 
 @runtime_checkable
 class DataPreset(Preset, Protocol):
+    """A preset that emits a DSL manifest first, then compiles it. `manifest` exposes the
+    document for inspection or patching; `build` is its compiled form."""
+
     def manifest(self, roles: Fill) -> dsl.Manifest: ...
 
 

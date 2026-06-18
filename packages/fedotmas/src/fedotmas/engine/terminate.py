@@ -9,6 +9,9 @@ from fedotmas.engine.report import StepReport
 
 
 class Terminate(Protocol):
+    """A stop condition checked after each superstep. Combine the built-ins with `&` and `|`,
+    or fold many with all_of/any_of."""
+
     def done(self, view: View, report: StepReport) -> bool: ...
 
 
@@ -24,6 +27,9 @@ class _Term:
 
 
 class Budget(_Term):
+    """Stop after `max_steps` supersteps. Counts the report index, the per-run axis, so it caps
+    one run regardless of where the store clock started."""
+
     def __init__(self, max_steps: int) -> None:
         if max_steps < 1:
             raise ValueError(f"Budget needs max_steps >= 1, got {max_steps}")
@@ -34,6 +40,8 @@ class Budget(_Term):
 
 
 class Goal(_Term):
+    """Stop once a predicate over the store holds, e.g. the output fact exists."""
+
     def __init__(self, predicate: Callable[[View], bool]) -> None:
         self.predicate = predicate
 
@@ -42,6 +50,8 @@ class Goal(_Term):
 
 
 class Quiescence(_Term):
+    """Stop when a superstep fires nothing: the system has gone quiet on its own."""
+
     def done(self, view: View, report: StepReport) -> bool:
         return not report.fired
 
@@ -63,12 +73,14 @@ class _Or(_Term):
 
 
 def all_of(*terms: Terminate) -> Terminate:
+    """Stop when every term holds. The n-ary form of `&`."""
     if not terms:
         raise ValueError("all_of needs at least one Terminate")
     return reduce(_And, terms)
 
 
 def any_of(*terms: Terminate) -> Terminate:
+    """Stop when any term holds. The n-ary form of `|`."""
     if not terms:
         raise ValueError("any_of needs at least one Terminate")
     return reduce(_Or, terms)

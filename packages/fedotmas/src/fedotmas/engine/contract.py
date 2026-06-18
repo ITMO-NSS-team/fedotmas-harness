@@ -15,6 +15,11 @@ Key = tuple[str, int, str]
 
 
 class Fact(BaseModel):
+    """One entry in the store: a `tag` naming the value, the `value` itself, and the provenance
+    the engine stamps on write (`producer` node, `step` clock). `meta` carries side data, e.g.
+    an error's traceback. The store keeps every version; `key` is the identity that separates
+    them."""
+
     tag: str
     value: Any = None
     producer: str = ""
@@ -29,12 +34,19 @@ class Fact(BaseModel):
 
 
 class Card(BaseModel):
+    """A node's self-description for introspection: its name, doc, and meta (e.g. an auction
+    bid a Policy reads back)."""
+
     name: str
     description: str = ""
     meta: dict[str, Any] = Field(default_factory=dict)
 
 
 class Result(BaseModel):
+    """What a node returns from invoke: the facts it `writes` (stamped by the engine before
+    they land), or `status=ERROR` with a message. The writes are committed at the end of the
+    superstep, so a node never sees its own output within the same step."""
+
     status: Status = Status.OK
     error: str | None = None
     writes: list[Fact] = Field(default_factory=list)

@@ -10,6 +10,9 @@ from fedotmas_meta.presets._spec import Fill, RoleSpec, check_fill
 
 @dataclass(frozen=True)
 class BoardPreset:
+    """A preset whose body is a blackboard, nested as one typed flow node. The fixed roles
+    wire researcher -> skeptic -> synthesizer over shared facts; build fills their prompts."""
+
     name: str
     hint: str
     roles: tuple[RoleSpec, ...]
