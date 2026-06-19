@@ -75,7 +75,7 @@ flow = dsl.compile(dsl.parse("""{
 - [`fedotmas-llm`](packages/fedotmas-llm): the LLM layer over the engine with provider backends and serving; early
 - [`fedotmas-meta`](packages/fedotmas-meta): the meta-agent that builds systems from task descriptions; early
 
-## Writing
+## Articles
 
 - **Does going multi-agent pay off, and can you auto-pick a pattern per task?** · [EN](https://dev.to/enorth/does-going-multi-agent-pay-off-and-can-you-auto-pick-a-pattern-per-task-15ld) · [RU](https://habr.com/ru/articles/1047422/)
 
