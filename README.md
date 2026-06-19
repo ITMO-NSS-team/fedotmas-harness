@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="https://raw.githubusercontent.com/ITMO-NSS-Team/fedotmas-harness/main/assets/logo.svg" alt="logo" width="275"/>
+
 # `FEDOT.MAS`
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
