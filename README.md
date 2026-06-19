@@ -17,7 +17,7 @@ An agent-SDK-agnostic framework for building multi-agent systems: a tiny orchest
 Not yet on PyPI, install from git with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-git clone https://github.com/ITMO-NSS-team/fedotmas.git
+git clone https://github.com/ITMO-NSS-team/fedotmas-harness.git
 cd fedotmas
 uv sync --all-packages
 ```
