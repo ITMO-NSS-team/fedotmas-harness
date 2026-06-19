@@ -1,0 +1,24 @@
+[build-system]
+build-backend = "uv_build"
+requires = [ "uv-build>=0.9.21,<0.10" ]
+
+[project]
+name = "fedotmas-serve"
+version = "0.1.0"
+description = "Infrastructure Library for FEDOT.MAS"
+readme = "README.md"
+authors = [ { name = "Dmitry Gilemkhanov", email = "me@dmitryglhf.ru" } ]
+requires-python = ">=3.11"
+classifiers = [
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
+dependencies = [
+  "fedotmas[llm]",
+]
+
+[tool.uv]
+sources.fedotmas = { workspace = true }
