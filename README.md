@@ -12,7 +12,7 @@
 
 An agent-SDK-agnostic framework for building multi-agent systems: a tiny orchestration engine, a typed SDK on top, and a JSON manifest language so systems can be written as data.
 
-## Install
+## Install & Quick start
 
 Not yet on PyPI, install from git with [uv](https://docs.astral.sh/uv/):
 
