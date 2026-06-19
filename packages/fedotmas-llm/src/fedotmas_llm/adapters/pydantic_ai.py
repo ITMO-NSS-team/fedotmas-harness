@@ -3,10 +3,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from fedotmas.engine.contract import View
 from pydantic import BaseModel
 from pydantic_ai import Agent
-
-from fedotmas.engine.contract import View
 
 
 def _as_text(input: Any) -> str:

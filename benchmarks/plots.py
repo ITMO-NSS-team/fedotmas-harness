@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-from report import OUT, ORDER, load, metrics, stable_oracle
+from report import ORDER, OUT, load, metrics, stable_oracle
 
 FIGS = Path(__file__).parent / "figures"
 GPT_OSS = "openrouter:openai/gpt-oss-20b"

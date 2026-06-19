@@ -17,7 +17,7 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-  "fedotmas[llm]",
+  "fedotmas",
 ]
 
 [tool.uv]

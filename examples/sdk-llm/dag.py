@@ -1,8 +1,8 @@
 import asyncio
 
 from dotenv import load_dotenv
-from fedotmas.adapters.pydantic_ai import PydanticAI
 from fedotmas.sdk import agent, gather
+from fedotmas_llm.adapters.pydantic_ai import PydanticAI
 
 extract = agent(
     "extract", prompt="Extract the central claim of the text in one sentence."

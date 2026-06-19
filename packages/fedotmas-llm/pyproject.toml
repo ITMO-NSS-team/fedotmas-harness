@@ -3,9 +3,9 @@ build-backend = "uv_build"
 requires = [ "uv-build>=0.9.21,<0.10" ]
 
 [project]
-name = "fedotmas-serve"
+name = "fedotmas-llm"
 version = "0.1.0"
-description = "Infrastructure Library for FEDOT.MAS"
+description = "LLM Primitives and Serving for Agent Systems"
 readme = "README.md"
 authors = [ { name = "Dmitry Gilemkhanov", email = "me@dmitryglhf.ru" } ]
 requires-python = ">=3.11"
@@ -17,12 +17,17 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
+  "fedotmas",
+  "pydantic-ai-slim[openai,openrouter]>=1.106",
+  "python-dotenv>=1.2.2",
+]
+optional-dependencies.serve = [
   "dishka>=1.10.1",
   "fastapi[standard]>=0.137.2",
   "fastmcp>=3.4.2",
-  "fedotmas[llm]",
   "redis>=8",
 ]
 
 [tool.uv]
 sources.fedotmas = { workspace = true }
+sources.fedotmas-meta = { workspace = true }

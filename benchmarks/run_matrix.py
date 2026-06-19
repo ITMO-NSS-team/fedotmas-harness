@@ -21,7 +21,7 @@ from types import ModuleType
 os.environ.setdefault("DEEPEVAL_TELEMETRY_OPT_OUT", "YES")
 
 from dotenv import load_dotenv  # noqa: E402
-from fedotmas.adapters.pydantic_ai import PydanticAI  # noqa: E402
+from fedotmas_llm.adapters.pydantic_ai import PydanticAI  # noqa: E402
 from fedotmas_meta.presets import get  # noqa: E402
 from model import FlowModel  # noqa: E402
 

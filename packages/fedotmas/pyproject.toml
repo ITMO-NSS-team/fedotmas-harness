@@ -20,7 +20,3 @@ dependencies = [
   "pydantic>=2.13.4",
   "typing-extensions>=4.15",
 ]
-optional-dependencies.llm = [
-  "pydantic-ai-slim[openai,openrouter]>=1.106",
-  "python-dotenv>=1.2.2",
-]

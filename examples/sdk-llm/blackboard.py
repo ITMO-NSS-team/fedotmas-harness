@@ -1,8 +1,8 @@
 import asyncio
 
 from dotenv import load_dotenv
-from fedotmas.adapters.pydantic_ai import PydanticAI
 from fedotmas.sdk import Rule, blackboard
+from fedotmas_llm.adapters.pydantic_ai import PydanticAI
 
 
 async def main() -> None:

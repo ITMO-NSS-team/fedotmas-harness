@@ -2,7 +2,7 @@ import asyncio
 
 from dotenv import load_dotenv
 from fedotmas import dsl
-from fedotmas.adapters.pydantic_ai import PydanticAI
+from fedotmas_llm.adapters.pydantic_ai import PydanticAI
 
 MANIFEST = {
     "version": 1,

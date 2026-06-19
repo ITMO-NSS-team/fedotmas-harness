@@ -3,7 +3,7 @@
 import asyncio
 
 from dotenv import load_dotenv
-from fedotmas.adapters.pydantic_ai import PydanticAI
+from fedotmas_llm.adapters.pydantic_ai import PydanticAI
 from fedotmas_meta.presets import get
 from fedotmas_meta.selector import select
 
