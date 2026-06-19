@@ -2,9 +2,9 @@ import asyncio
 
 from dotenv import load_dotenv
 from fedotmas import dsl
-from fedotmas.adapters.pydantic_ai import PydanticAI
 from fedotmas.engine import View
 from fedotmas.sdk import action
+from fedotmas_llm.adapters.pydantic_ai import PydanticAI
 from pydantic import BaseModel
 
 llm = PydanticAI("openai-responses:gpt-4o-mini")

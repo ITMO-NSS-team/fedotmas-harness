@@ -3,7 +3,6 @@
 from typing import Any
 
 import pytest
-
 from fedotmas import dsl
 from fedotmas.engine import View
 from fedotmas_meta.presets import DataPreset, catalog, get
