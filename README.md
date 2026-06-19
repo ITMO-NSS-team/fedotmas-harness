@@ -12,15 +12,34 @@
 
 An agent-SDK-agnostic framework for building multi-agent systems: a tiny orchestration engine, a typed SDK on top, and a JSON manifest language so systems can be written as data.
 
+## Install
+
+Not yet on PyPI, install from git with [uv](https://docs.astral.sh/uv/):
+
+```bash
+git clone https://github.com/ITMO-NSS-team/fedotmas.git
+cd fedotmas
+uv sync --all-packages
+```
+
+The LLM examples need a provider key, e.g. `OPENAI_API_KEY`.
+
 ```python
+import asyncio
+
 from fedotmas.sdk import agent
 from fedotmas_llm.adapters.pydantic_ai import PydanticAI
 
 outline = agent("outline", prompt="Give a 3-bullet outline for the topic.")
 draft = agent("draft", prompt="Write one vivid paragraph from the outline.")
 
-run = await (outline + draft).run("heralt of rivia", llm=PydanticAI("openai-responses:gpt-4o-mini"))
-print(run.value)
+
+async def main():
+    run = await (outline + draft).run("heralt of rivia", llm=PydanticAI("openai-responses:gpt-4o-mini"))
+    print(run.value)
+
+
+asyncio.run(main())
 ```
 
 LLM and plain code are the same kind of node:
