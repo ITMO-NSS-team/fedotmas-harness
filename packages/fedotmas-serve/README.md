@@ -1,3 +1,3 @@
 # fedotmas-serve
 
-Library for serving framework's components
+Infrastructure for interaction with FEDOT.MAS components (such as meta-agent).
