@@ -13,9 +13,9 @@ from fedotmas.engine.terminate import Budget, Goal, Terminate, any_of
 from fedotmas.sdk._inject import bind_pred
 from fedotmas.sdk.flow._condition import Condition, _as_predicate, _pick
 from fedotmas.sdk.flow._nodes import (
+    Ctx,
     _alias_node,
     _collect_node,
-    Ctx,
     _inner_guard,
     _into_node,
     _loop_finish_node,
@@ -34,9 +34,10 @@ C = TypeVar("C")
 
 
 class Flow(Generic[A, B]):
-    """A typed dataflow fragment from input A to output B. Make atoms with action (code) or
-    agent (LLM), then compose: + is sequence, gather runs branches in parallel, branch routes
-    by label, .loop iterates, nest wraps a whole sub-system as one node. `.system(entry, out)`
+    """A typed dataflow fragment from input A to output B. Make atoms with action (a code
+    body), or an extension node-kind such as fedotmas-llm's agent, then compose: + is
+    sequence, gather runs branches in parallel, branch routes by label, .loop iterates, nest
+    wraps a whole sub-system as one node. `.system(entry, out)`
     compiles the fragment to an engine System; `.run(value)` compiles and executes it in one
     call. The type parameters check each stitch: a + b only type-checks when b accepts what a
     produces.
@@ -328,8 +329,8 @@ class _Nest(Flow[A, B]):
             )
         elif isinstance(self._target, System):
             system = self._target
-        else:  # a Board: compile with the flow's default llm as the fallback backend
-            system = self._target.compile()
+        else:  # a Board: thread the flow's run-scoped bindings as its rules' fallback
+            system = self._target.compile(ctx.bindings)
         until = self._until or Goal(lambda v: v.exists(inner_out))
         if self._budget is not None:
             until = any_of(until, Budget(self._budget))
@@ -362,8 +363,8 @@ def nest(
     one fact out. The boundary is typed and composes; the interior stays opaque. This is
     how a goal-terminating Board (the blackboard surface) enters the arrow world, and how a
     flow nests another flow as an isolated unit. A Flow or Board target picks up the outer
-    flow's default llm as its fallback backend; a System is already compiled, so the default
-    does not reach inside it. The inner run is the outer node's single superstep, so the
+    flow's run-scoped bindings as its fallback; a System is already compiled, so they do not
+    reach inside it. The inner run is the outer node's single superstep, so the
     outer budget cannot interrupt it; `budget` caps the inner supersteps instead (the default
     100 is a runaway guard, None lifts it). The inner run always halts on its first error and
     the failure surfaces as this node's error fact; the outer halt_on_error then decides

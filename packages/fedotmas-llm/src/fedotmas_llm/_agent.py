@@ -3,9 +3,10 @@ from __future__ import annotations
 from typing import Any, Literal, TypeVar, overload
 
 from fedotmas.engine.contract import Node, View
-from fedotmas.sdk import LLM
 from fedotmas.sdk._template import render
 from fedotmas.sdk.ext import Ctx, Flow, node_from_fn
+
+from fedotmas_llm._llm import LLM
 
 A = TypeVar("A")
 B = TypeVar("B")

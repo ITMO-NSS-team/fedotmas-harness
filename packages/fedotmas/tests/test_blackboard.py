@@ -1,20 +1,8 @@
 """The blackboard surface: produce-once, when triggers, re-fire identity, validation."""
 
-from typing import Any
-
 import pytest
-from fedotmas.engine import Fact, Goal, ReactiveExecutor, Store, View
+from fedotmas.engine import Fact, Goal, ReactiveExecutor, Store
 from fedotmas.sdk import Rule, blackboard
-
-
-class FakeLLM:
-    def __init__(self, reply) -> None:
-        self._reply = reply
-
-    async def complete(
-        self, prompt: str, input: Any, view: View, returns: Any = str
-    ) -> Any:
-        return self._reply(prompt, input)
 
 
 async def bump(value, view):
@@ -103,21 +91,6 @@ async def test_outcome_can_reach_the_goal_past_an_error():
     assert out.errors
 
 
-async def test_prompt_rule_uses_the_board_default_llm():
-    board = blackboard(
-        Rule("r", prompt="say", reads="q", writes="ans"),
-        llm=FakeLLM(lambda p, content: f"{p}:{content}"),
-    )
-    out = await board.run({"q": "hi"}, goal="ans")
-    assert out.value == "say:hi"
-
-
-def test_prompt_rule_without_a_backend_fails_at_compile_time():
-    board = blackboard(Rule("r", prompt="say", writes="ans", when=["q"]))
-    with pytest.raises(ValueError, match="no llm bound"):
-        board.compile()
-
-
 def test_meta_rides_to_the_card():
     board = blackboard(Rule("r", fn=mark, reads="a", writes="b", meta={"bid": 3}))
     assert board.system.nodes[0].describe().meta == {"bid": 3}
@@ -130,7 +103,6 @@ def test_meta_rides_to_the_card():
         pytest.param(Rule("r", fn=bump, writes="c", when=["a", "!a"]), id="when-clash"),
         pytest.param(Rule("r", fn=bump, writes=""), id="no-writes"),
         pytest.param(Rule("r", writes="c"), id="no-step"),
-        pytest.param(Rule("r", fn=bump, prompt="p", writes="c"), id="two-steps"),
         pytest.param(
             Rule("r", fn=bump, writes="c", when=["a", ""]), id="empty-when-tag"
         ),

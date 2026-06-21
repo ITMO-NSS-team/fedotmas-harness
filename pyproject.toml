@@ -27,6 +27,6 @@ examples = [
 workspace.members = [ "packages/*" ]
 
 [tool.pytest]
-ini_options.testpaths = [ "packages/fedotmas/tests", "packages/fedotmas-meta/tests" ]
+ini_options.testpaths = [ "packages/fedotmas/tests", "packages/fedotmas-llm/tests", "packages/fedotmas-meta/tests" ]
 ini_options.asyncio_mode = "auto"
 ini_options.asyncio_default_fixture_loop_scope = "function"

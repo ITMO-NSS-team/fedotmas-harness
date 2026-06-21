@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from fedotmas.sdk import Flow, Rule, blackboard, nest
+from fedotmas.sdk import Flow, blackboard, nest
+from fedotmas_llm import PromptRule
 
 from fedotmas_meta.presets._spec import Fill, RoleSpec, check_fill
 
@@ -20,20 +21,20 @@ class BoardPreset:
     def build(self, roles: Fill) -> Flow[Any, Any]:
         fill = check_fill(self.name, self.roles, roles)
         board = blackboard(
-            Rule(
+            PromptRule(
                 "researcher",
                 prompt=fill["researcher"],
                 reads="question",
                 writes="facts",
             ),
-            Rule(
+            PromptRule(
                 "skeptic",
                 prompt=fill["skeptic"],
                 reads="facts",
                 writes="review",
                 input="Question: {question}\n\nFacts:\n{input}",
             ),
-            Rule(
+            PromptRule(
                 "synthesizer",
                 prompt=fill["synthesizer"],
                 reads="review",

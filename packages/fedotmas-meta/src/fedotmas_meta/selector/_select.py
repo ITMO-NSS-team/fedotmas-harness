@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from fedotmas.sdk import LLM, agent
+from fedotmas_llm import LLM, agent
 
 from fedotmas_meta.presets import Preset, catalog
 
@@ -27,7 +27,7 @@ async def select(
     pick = agent(
         "select", prompt=_PROMPT.format(menu=menu), labels=[p.name for p in pool]
     )
-    run = await pick.run(task, llm=llm)
+    run = await pick.run(task, bind={"llm": llm})
     if not run.ok:
         raise RuntimeError(f"selection failed: {run.reason}")
     return Selection(pattern=run.value)

@@ -12,11 +12,18 @@
 > [!WARNING]
 > Early development (v0.1). The API will change between versions.
 
-An agent-SDK-agnostic framework for building multi-agent systems: a tiny orchestration engine, a typed SDK on top, and a JSON manifest language so systems can be written as data.
+A typed dataflow engine for systems that build up a shared state. A thin LLM layer on top turns it into a multi-agent framework.
 
-## Install & Quick start
+## Approach
 
-Not yet on PyPI, install from git with [uv](https://docs.astral.sh/uv/):
+The idea behind the engine is that typed atoms read from and write to a shared memory, scheduled in supersteps until a goal is reached. The core `fedotmas` has no LLM vocabulary and no heavy dependencies. Model-specific code lives in an extension, built on the core's public API. `fedotmas-llm` adds agents, provider backends, and serving, and the engine still never names a model. Like Rust's `crates/`, our `packages/` holds the core and its extensions, so you depend only on the layer you need:
+
+- code-only systems: just `fedotmas`, no provider, nothing to bind.
+- agent systems: add `fedotmas-llm` and bind a backend at run time.
+
+## Install
+
+Install from git with [uv](https://docs.astral.sh/uv/):
 
 ```bash
 git clone https://github.com/ITMO-NSS-team/fedotmas-harness.git
@@ -24,58 +31,11 @@ cd fedotmas
 uv sync --all-packages
 ```
 
-The LLM examples need a provider key, e.g. `OPENAI_API_KEY`.
-
-```python
-import asyncio
-
-from fedotmas.sdk import agent
-from fedotmas_llm.adapters.pydantic_ai import PydanticAI
-
-outline = agent("outline", prompt="Give a 3-bullet outline for the topic.")
-draft = agent("draft", prompt="Write one vivid paragraph from the outline.")
-
-
-async def main():
-    run = await (outline + draft).run("heralt of rivia", llm=PydanticAI("openai-responses:gpt-4o-mini"))
-    print(run.value)
-
-
-asyncio.run(main())
-```
-
-LLM and plain code are the same kind of node:
-
-```python
-from fedotmas.sdk import action, agent
-
-@action
-async def count(text: str, view) -> dict:
-    return {"text": text, "words": len(text.split())}
-
-flow = agent("summarize", prompt="Summarize in one sentence.") + count
-```
-
-Any agent SDK binds the same way: the `LLM` seam is a single method, see [backends.py](examples/sdk-llm/backends.py).
-
-The same system as a document:
-
-```python
-from fedotmas import dsl
-
-flow = dsl.compile(dsl.parse("""{
-  "version": 1,
-  "nodes": {"outline": "Give a 3-bullet outline for the topic.",
-            "draft": "Write one vivid paragraph from the outline."},
-  "flow": ["outline", "draft"]
-}"""))
-```
-
 ## Packages
 
-- [`fedotmas`](packages/fedotmas): the core engine, sdk, dsl
-- [`fedotmas-llm`](packages/fedotmas-llm): the LLM layer over the engine with provider backends and serving; early
-- [`fedotmas-meta`](packages/fedotmas-meta): the meta-agent that builds systems from task descriptions; early
+- [`fedotmas`](packages/fedotmas): engine, typed SDK, and JSON DSL.
+- [`fedotmas-llm`](packages/fedotmas-llm): the LLM extension. Agents, provider backends, serving. Early.
+- [`fedotmas-meta`](packages/fedotmas-meta): the meta-agent that builds systems from a task description. Early.
 
 ## Articles
 

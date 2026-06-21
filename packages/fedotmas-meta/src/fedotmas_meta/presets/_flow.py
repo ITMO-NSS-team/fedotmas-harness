@@ -7,6 +7,7 @@ from typing import Any
 from fedotmas import dsl
 from fedotmas.engine import View
 from fedotmas.sdk import Flow, action
+from fedotmas_llm import agent
 
 from fedotmas_meta.presets._spec import Fill, RoleSpec, check_fill
 
@@ -29,7 +30,9 @@ class FlowPreset:
         return dsl.Manifest.model_validate(self._doc(fill))
 
     def build(self, roles: Fill) -> Flow[Any, Any]:
-        return dsl.compile(self.manifest(roles), atoms=self._atoms)
+        return dsl.compile(
+            self.manifest(roles), atoms=self._atoms, providers={"agent": agent}
+        )
 
 
 def _lift(**seed: Any) -> Flow[Any, Any]:

@@ -20,16 +20,12 @@ _METERS = ("input_tokens", "output_tokens", "requests")
 
 
 class PydanticAI:
-    """An LLM backend over pydantic-ai: plug it in wherever a node or run takes `llm`. `model`
-    is a pydantic-ai model id (e.g. "openai:gpt-4o"); `settings` pass straight to the Agent.
-    `usage` accumulates token and request counts across every call. The non-string input is
-    sent as JSON, and `returns` becomes the agent's output_type, so a structured type comes
-    back parsed."""
+    """An LLM backend over pydantic-ai Agent."""
 
     def __init__(self, model: str, **settings: Any) -> None:
         self._model = model
         self._settings = settings
-        # one Agent per (prompt, output type): both are fixed per node, so the cache is stable
+        # caches agents
         self._agents: dict[tuple[str, Any], Agent] = {}
         self.usage: dict[str, int] = dict.fromkeys(_METERS, 0)
 

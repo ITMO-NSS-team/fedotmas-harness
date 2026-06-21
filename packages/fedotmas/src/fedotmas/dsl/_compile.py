@@ -53,8 +53,8 @@ def compile(
 ) -> Flow[Any, Any]:
     """Turn a validated manifest into one Flow, deterministically: same document, same
     graph. `atoms` fills ref: nodes, `types` names the takes/returns models, `providers` maps a
-    node-kind to its builder -- prompt nodes (a bare string or a Prompted) need
-    providers["agent"], supplied by the LLM cartridge as fedotmas_llm.agent. Run configuration
+    node-kind to its builder. Prompt nodes (a bare string or a Prompted) need
+    providers["agent"], supplied by the LLM extension as fedotmas_llm.agent. Run configuration
     (the llm via bind, budget, halt_on_error) stays at the call site."""
     if manifest.flow is None:
         raise ManifestError(
