@@ -16,10 +16,7 @@ A typed dataflow engine for systems that build up a shared state. A thin LLM lay
 
 ## Approach
 
-The idea behind the engine is that typed atoms read from and write to a shared memory, scheduled in supersteps until a goal is reached. The core `fedotmas` has no LLM vocabulary and no heavy dependencies. Model-specific code lives in an extension, built on the core's public API. `fedotmas-llm` adds agents, provider backends, and serving, and the engine still never names a model. Like Rust's `crates/`, our `packages/` holds the core and its extensions, so you depend only on the layer you need:
-
-- code-only systems: just `fedotmas`, no provider, nothing to bind.
-- agent systems: add `fedotmas-llm` and bind a backend at run time.
+The idea behind the engine is that typed atoms read from and write to a shared memory, scheduled in supersteps until a goal is reached. The core `fedotmas` has no LLM vocabulary and no heavy dependencies. Model-specific code lives in an extension, built on the core's public API. `fedotmas-llm` adds agents, provider backends, and serving, and the engine still never names a model.
 
 ## Install
 
