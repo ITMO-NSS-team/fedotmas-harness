@@ -1,6 +1,6 @@
 # fedotmas-llm
 
-The LLM extension over the [`fedotmas`](../fedotmas) engine. A prompt becomes an atom, a backend binds at run time, and the whole flow, blackboard, and DSL surface carries over unchanged. It is built on the core's public extension surface, so the engine itself stays model-free.
+The LLM extension over the [`fedotmas`](../fedotmas) engine.
 
 The bundled backend ships under an extra: `pip install fedotmas-llm[pydantic-ai]`. Serving lives under `serve`.
 
