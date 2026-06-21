@@ -4,9 +4,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from fedotmas import dsl
+from fedotmas import Flow, action, dsl
 from fedotmas.engine import View
-from fedotmas.sdk import Flow, action
 from fedotmas_llm import agent
 
 from fedotmas_meta.presets._spec import Fill, RoleSpec, check_fill

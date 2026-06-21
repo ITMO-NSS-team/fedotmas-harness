@@ -16,7 +16,7 @@ from pydantic import (
 from typing_extensions import TypeAliasType
 
 from fedotmas.dsl._errors import Issue, ManifestError, _from_validation_error
-from fedotmas.sdk.flow import Condition as _SdkCondition
+from fedotmas.flow import Condition as _SdkCondition
 
 _Scalar = str | int | float | bool | None
 

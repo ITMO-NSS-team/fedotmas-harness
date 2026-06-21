@@ -2,6 +2,8 @@
 
 The LLM extension over the [`fedotmas`](../fedotmas) engine. A prompt becomes an atom, a backend binds at run time, and the whole flow, blackboard, and DSL surface carries over unchanged. It is built on the core's public extension surface, so the engine itself stays model-free.
 
+The bundled backend ships under an extra: `pip install fedotmas-llm[pydantic-ai]`. Serving lives under `serve`.
+
 > The runnable examples need a provider key, e.g. `OPENAI_API_KEY`.
 
 ## Agents
@@ -24,7 +26,7 @@ print(asyncio.run(flow.run("geralt of rivia", bind={"llm": backend})).value)
 The backend binds once per run under `"llm"`, so nothing is hard-wired into the nodes. Code and prompts mix freely, because `action` and `agent` are the same kind of node:
 
 ```python
-from fedotmas.sdk import action
+from fedotmas import action
 
 @action
 async def count(text: str) -> dict:
@@ -52,7 +54,7 @@ run = await flow.run("topic", bind={"llm": Echo()})
 Give an agent `labels` and it returns one of them, the shape `branch` routes on:
 
 ```python
-from fedotmas.sdk import branch
+from fedotmas import branch
 
 kind = agent("kind", prompt="Classify the issue.", labels=["bug", "feature"])
 triage = branch(kind, {"bug": fix, "feature": plan})
@@ -63,7 +65,7 @@ triage = branch(kind, {"bug": fix, "feature": plan})
 `PromptRule` is the blackboard version, a rule whose body is a prompt. Code `Rule`s and `PromptRule`s share one board:
 
 ```python
-from fedotmas.sdk import blackboard
+from fedotmas import blackboard
 from fedotmas_llm import PromptRule
 
 board = blackboard(

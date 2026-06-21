@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
-from fedotmas import dsl
-from fedotmas.sdk import Flow
+from fedotmas import Flow, dsl
 
 from fedotmas_meta.presets._board import BLACKBOARD
 from fedotmas_meta.presets._flow import (

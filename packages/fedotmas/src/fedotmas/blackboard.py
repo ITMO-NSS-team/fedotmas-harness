@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequenc
 from dataclasses import dataclass, field
 from typing import Any, cast
 
+from fedotmas._inject import bind_async
 from fedotmas.engine.contract import Fact, Node, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.node import as_node
@@ -12,8 +13,7 @@ from fedotmas.engine.report import StepReport
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
 from fedotmas.engine.terminate import Budget, Goal, Terminate
-from fedotmas.sdk._inject import bind_async
-from fedotmas.sdk.flow._outcome import Outcome
+from fedotmas.flow._outcome import Outcome
 
 # A rule's code body of either arity: `async (input)` or `async (input, view)`. The union keeps
 # both forms typed; _inject.bind_async adapts the one-arg form to the (input, view) contract.

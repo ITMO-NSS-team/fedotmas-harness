@@ -3,8 +3,8 @@
 from typing import Any
 
 import pytest
+from fedotmas import branch
 from fedotmas.engine import View
-from fedotmas.sdk import branch
 from fedotmas_llm import agent
 from pydantic import BaseModel
 

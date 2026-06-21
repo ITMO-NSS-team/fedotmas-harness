@@ -7,6 +7,7 @@ the fedotmas-llm test suite; here every compile uses code atoms by ref, so no pr
 import json
 
 import pytest
+from fedotmas import action
 from fedotmas.dsl import (
     Manifest,
     ManifestError,
@@ -16,7 +17,6 @@ from fedotmas.dsl import (
     parse,
     schema_for_flow,
 )
-from fedotmas.sdk import action
 
 
 def doc(**sections) -> str:

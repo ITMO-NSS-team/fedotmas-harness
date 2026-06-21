@@ -3,8 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal, TypeVar, overload
 
 from fedotmas.engine.contract import Node, View
-from fedotmas.sdk._template import render
-from fedotmas.sdk.ext import Ctx, Flow, node_from_fn
+from fedotmas.ext import Ctx, Flow, node_from_fn, render
 
 from fedotmas_llm._llm import LLM
 
@@ -90,7 +89,7 @@ def agent(
     llm: LLM | None = None,
 ) -> Flow[Any, Any]:
     """Lift a prompt into an LLM agent: a Flow atom whose body is data, not code. Always a
-    model call; the deterministic counterpart is fedotmas.sdk.action.
+    model call; the deterministic counterpart is fedotmas.action.
 
     `prompt` is the static system prompt. `input` is an optional template for what the model
     sees, rendered over the node's input (dict keys or model fields, store tags as fallback,

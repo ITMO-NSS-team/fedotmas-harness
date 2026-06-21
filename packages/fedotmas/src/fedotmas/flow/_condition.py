@@ -5,8 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, model_validator
 
+from fedotmas._inject import bind_pred
 from fedotmas.engine.contract import View
-from fedotmas.sdk._inject import bind_pred
 
 
 def _pick(state: Any, key: str) -> Any:

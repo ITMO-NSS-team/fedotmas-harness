@@ -5,8 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fedotmas.engine.contract import View
-from fedotmas.sdk._template import render
-from fedotmas.sdk.ext import Rule
+from fedotmas.ext import Rule, render
 
 from fedotmas_llm._llm import LLM
 
@@ -16,7 +15,7 @@ _BoundFn = Callable[[Any, View], Awaitable[Any]]
 @dataclass
 class PromptRule(Rule):
     """A blackboard rule whose body is a prompt over the LLM seam, the reactive counterpart to
-    fedotmas.sdk.Rule's code body and the same minimal pair as agent to action. `prompt` is the
+    fedotmas.Rule's code body and the same minimal pair as agent to action. `prompt` is the
     static system prompt; `input` is an optional template for what the model sees, rendered over
     the read fact; `returns` its output type. It binds its backend via `llm` here or the
     run-scoped `bind={"llm": ...}`; reads/writes/when/meta behave exactly as on a code Rule.

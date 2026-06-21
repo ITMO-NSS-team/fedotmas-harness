@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import create_model
 
-from fedotmas import sdk
+from fedotmas.atoms import action
 from fedotmas.dsl._errors import Issue, ManifestError
 from fedotmas.dsl._manifest import (
     AtomRef,
@@ -18,7 +18,7 @@ from fedotmas.dsl._manifest import (
     Step,
     TypeRef,
 )
-from fedotmas.sdk import Flow
+from fedotmas.flow import Flow, branch, gather, nest
 
 _TYPES: dict[str, type] = {
     "str": str,
@@ -41,7 +41,7 @@ async def _skip(value: Any, view: Any) -> Any:
 
 
 def _invalid() -> Flow[Any, Any]:
-    return sdk.action(_skip, name="invalid")
+    return action(_skip, name="invalid")
 
 
 def compile(
@@ -168,7 +168,7 @@ class _Compiler:
                 out = out + step
             return out
         if isinstance(e, Gather):
-            return sdk.gather(
+            return gather(
                 *(
                     self.expr(item, f"{path}.gather.{i}", stack)
                     for i, item in enumerate(e.gather)
@@ -179,7 +179,7 @@ class _Compiler:
                 label: self.expr(case, f"{path}.cases.{label}", stack)
                 for label, case in e.cases.items()
             }
-            return sdk.branch(e.branch, cases)
+            return branch(e.branch, cases)
         if isinstance(e, Loop):
             body = self.expr(e.loop, f"{path}.loop", stack)
             if e.budget is not None:
@@ -195,8 +195,8 @@ class _Compiler:
                 return _invalid()
             inner = self.expr(e.nest, f"{path}.nest", stack)
             if e.budget is not None:
-                return sdk.nest(inner, entry="in", out="out", budget=e.budget)
-            return sdk.nest(inner, entry="in", out="out")
+                return nest(inner, entry="in", out="out", budget=e.budget)
+            return nest(inner, entry="in", out="out")
         assert isinstance(e, Step)
         inner = self.expr(e.step, f"{path}.step", stack)
         return inner.into(e.into) if e.into is not None else inner.merge()

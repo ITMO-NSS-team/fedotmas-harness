@@ -12,7 +12,7 @@ from fedotmas.engine import (
     System,
     as_node,
 )
-from fedotmas.sdk import action, gather
+from fedotmas import action, gather
 
 
 async def double(x, view):

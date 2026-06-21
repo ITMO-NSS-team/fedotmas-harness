@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
+from fedotmas._inject import bind_pred
 from fedotmas.engine.contract import Fact, Node, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.node import as_node
@@ -10,9 +11,8 @@ from fedotmas.engine.report import StepReport
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
 from fedotmas.engine.terminate import Budget, Goal, Terminate, any_of
-from fedotmas.sdk._inject import bind_pred
-from fedotmas.sdk.flow._condition import Condition, _as_predicate, _pick
-from fedotmas.sdk.flow._nodes import (
+from fedotmas.flow._condition import Condition, _as_predicate, _pick
+from fedotmas.flow._nodes import (
     Ctx,
     _alias_node,
     _collect_node,
@@ -22,11 +22,11 @@ from fedotmas.sdk.flow._nodes import (
     _loop_iterate_node,
     _merge_node,
 )
-from fedotmas.sdk.flow._outcome import Outcome
+from fedotmas.flow._outcome import Outcome
 
 if TYPE_CHECKING:
+    from fedotmas.blackboard import Board
     from fedotmas.engine.policy import Policy
-    from fedotmas.sdk.blackboard import Board
 
 A = TypeVar("A")
 B = TypeVar("B")

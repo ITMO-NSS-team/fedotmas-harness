@@ -3,8 +3,7 @@
 import functools
 
 import pytest
-from fedotmas.engine import Fact, Goal, ReactiveExecutor, Store
-from fedotmas.sdk import (
+from fedotmas import (
     Condition,
     Rule,
     RunError,
@@ -14,6 +13,7 @@ from fedotmas.sdk import (
     gather,
     nest,
 )
+from fedotmas.engine import Fact, Goal, ReactiveExecutor, Store
 from pydantic import BaseModel
 
 

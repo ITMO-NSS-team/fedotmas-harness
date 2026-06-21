@@ -1,8 +1,8 @@
 """The blackboard surface: produce-once, when triggers, re-fire identity, validation."""
 
 import pytest
+from fedotmas import Rule, blackboard
 from fedotmas.engine import Fact, Goal, ReactiveExecutor, Store
-from fedotmas.sdk import Rule, blackboard
 
 
 async def bump(value, view):

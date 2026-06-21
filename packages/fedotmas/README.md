@@ -8,7 +8,7 @@ The unit is an **atom**: a typed async step that reads an input and writes an ou
 
 ```python
 import asyncio
-from fedotmas.sdk import action, gather
+from fedotmas import action, gather
 
 @action
 async def research(topic: str) -> str:
@@ -40,7 +40,7 @@ print(asyncio.run(fanned.run("abc")).value)    # ['ABC', 'cba']
 The same combinators express optimization. Feed each round's output back in until a goal holds:
 
 ```python
-from fedotmas.sdk import action
+from fedotmas import action
 
 TARGET = 100
 
@@ -60,7 +60,7 @@ Nothing here is agent-specific. A population of graphs, a simulation, a solver: 
 When there is no fixed pipeline, declare **rules** that fire when their inputs appear:
 
 ```python
-from fedotmas.sdk import Rule, blackboard
+from fedotmas import Rule, blackboard
 
 async def score(draft, view): return len(draft.split())
 async def gate(n, view):      return "ship" if n >= 5 else "revise"
@@ -80,7 +80,7 @@ A system can be a JSON document, compiled the same way every time. Code atoms ar
 
 ```python
 from fedotmas import dsl
-from fedotmas.sdk import action
+from fedotmas import action
 
 manifest = dsl.parse('{"version": 1, "nodes": {"score": {"ref": "score"}}, "flow": "score"}')
 flow = dsl.compile(manifest, atoms={"score": action(score)})
@@ -88,4 +88,4 @@ flow = dsl.compile(manifest, atoms={"score": action(score)})
 
 ## Extending the engine
 
-A new node kind is a `Flow` subclass that implements `_build`. A new blackboard rule kind subclasses `Rule` and overrides `_body`. Both read run-scoped bindings off the context, so an extension can inject a backend the core never names. That is how [`fedotmas-llm`](../fedotmas-llm) adds `agent` and `PromptRule`. The surface is `fedotmas.sdk.ext`.
+A new node kind is a `Flow` subclass that implements `_build`. A new blackboard rule kind subclasses `Rule` and overrides `_body`. Both read run-scoped bindings off the context, so an extension can inject a backend the core never names. That is how [`fedotmas-llm`](../fedotmas-llm) adds `agent` and `PromptRule`. The surface is `fedotmas.ext`.

@@ -3,8 +3,8 @@
 from typing import Any
 
 from fedotmas.engine import View
+from fedotmas_meta import select
 from fedotmas_meta.presets import catalog, get
-from fedotmas_meta.selector import select
 
 
 class FakeLLM:

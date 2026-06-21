@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from fedotmas.sdk import Flow, blackboard, nest
+from fedotmas import Flow, blackboard, nest
 from fedotmas_llm import PromptRule
 
 from fedotmas_meta.presets._spec import Fill, RoleSpec, check_fill

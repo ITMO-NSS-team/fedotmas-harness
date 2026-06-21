@@ -3,11 +3,11 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
+from fedotmas._inject import bind_async
 from fedotmas.engine.contract import Fact, Node, Result, View
 from fedotmas.engine.node import as_node
-from fedotmas.sdk._inject import bind_async
-from fedotmas.sdk.flow._algebra import Flow
-from fedotmas.sdk.flow._nodes import Ctx
+from fedotmas.flow._algebra import Flow
+from fedotmas.flow._nodes import Ctx
 
 A = TypeVar("A")
 B = TypeVar("B")

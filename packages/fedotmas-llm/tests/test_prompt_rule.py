@@ -3,8 +3,8 @@
 from typing import Any
 
 import pytest
+from fedotmas import Rule, blackboard
 from fedotmas.engine import View
-from fedotmas.sdk import Rule, blackboard
 from fedotmas_llm import PromptRule
 
 

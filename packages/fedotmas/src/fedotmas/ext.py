@@ -10,9 +10,10 @@ through the same seam.
 
 from __future__ import annotations
 
-from fedotmas.sdk.atoms import node_from_fn
-from fedotmas.sdk.blackboard import Rule
-from fedotmas.sdk.flow._algebra import Flow
-from fedotmas.sdk.flow._nodes import Ctx
+from fedotmas._template import render
+from fedotmas.atoms import node_from_fn
+from fedotmas.blackboard import Rule
+from fedotmas.flow._algebra import Flow
+from fedotmas.flow._nodes import Ctx
 
-__all__ = ["Ctx", "Flow", "Rule", "node_from_fn"]
+__all__ = ["Ctx", "Flow", "Rule", "node_from_fn", "render"]
