@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from fedotmas.engine.contract import Fact, Node, Result, View
@@ -15,7 +15,7 @@ from fedotmas.sdk.flow._condition import Condition, _as_predicate, _pick
 from fedotmas.sdk.flow._nodes import (
     _alias_node,
     _collect_node,
-    _Ctx,
+    Ctx,
     _inner_guard,
     _into_node,
     _loop_finish_node,
@@ -26,7 +26,6 @@ from fedotmas.sdk.flow._outcome import Outcome
 
 if TYPE_CHECKING:
     from fedotmas.engine.policy import Policy
-    from fedotmas.sdk.atoms import LLM
     from fedotmas.sdk.blackboard import Board
 
 A = TypeVar("A")
@@ -43,20 +42,25 @@ class Flow(Generic[A, B]):
     produces.
     """
 
-    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
+    def _build(self, ctx: Ctx, entry: str) -> tuple[list[Node], str]:
         raise NotImplementedError
 
-    def system(self, *, entry: str, out: str, llm: LLM | None = None) -> System:
-        """Compile to a runnable System. `llm` becomes the default backend for every LLM node
-        that did not bind its own; a node with no backend at all fails here, not mid-run."""
-        ctx = _Ctx(llm=llm)
+    def system(
+        self, *, entry: str, out: str, bind: Mapping[str, Any] | None = None
+    ) -> System:
+        """Compile to a runnable System. `bind` is the run-scoped binding map threaded to every
+        node's builder (e.g. a default backend under "llm"); a node that needs a binding nobody
+        supplied fails here, not mid-run."""
+        ctx = Ctx(bindings=bind or {})
         nodes, last = self._build(ctx, entry)
         if last != out:
             nodes = [*nodes, _alias_node(last, out)]
         return System(nodes)
 
-    def _prepare(self, llm: LLM | None, budget: int | None) -> tuple[System, Terminate]:
-        system = self.system(entry="in", out="out", llm=llm)
+    def _prepare(
+        self, bind: Mapping[str, Any] | None, budget: int | None
+    ) -> tuple[System, Terminate]:
+        system = self.system(entry="in", out="out", bind=bind)
         terminate: Terminate = Goal(lambda v: v.exists("out"))
         if budget is not None:
             terminate = terminate | Budget(budget)
@@ -66,7 +70,7 @@ class Flow(Generic[A, B]):
         self,
         value: A,
         *,
-        llm: LLM | None = None,
+        bind: Mapping[str, Any] | None = None,
         budget: int | None = 100,
         policy: Policy | None = None,
         halt_on_error: bool = True,
@@ -78,7 +82,7 @@ class Flow(Generic[A, B]):
         in `.errors` and `.ok` stays False. Returns an Outcome: `.value`, `.ok`, `.reason`,
         `.errors`, and the full `.steps` trace.
         """
-        system, terminate = self._prepare(llm, budget)
+        system, terminate = self._prepare(bind, budget)
         run = await ReactiveExecutor(halt_on_error=halt_on_error).run(
             system,
             Store(),
@@ -92,13 +96,13 @@ class Flow(Generic[A, B]):
         self,
         value: A,
         *,
-        llm: LLM | None = None,
+        bind: Mapping[str, Any] | None = None,
         budget: int | None = 100,
         policy: Policy | None = None,
         halt_on_error: bool = True,
     ) -> AsyncIterator[StepReport]:
         """The streaming form of .run: yields each StepReport as the run unfolds."""
-        system, terminate = self._prepare(llm, budget)
+        system, terminate = self._prepare(bind, budget)
         async for report in ReactiveExecutor(halt_on_error=halt_on_error).stream(
             system,
             Store(),
@@ -149,7 +153,7 @@ class _Seq(Flow[Any, Any]):
         self._left = left
         self._right = right
 
-    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
+    def _build(self, ctx: Ctx, entry: str) -> tuple[list[Node], str]:
         la, lout = self._left._build(ctx, entry)
         ra, rout = self._right._build(ctx, lout)
         return [*la, *ra], rout
@@ -160,7 +164,7 @@ class _Into(Flow[dict, dict]):
         self._inner = inner
         self._key = key
 
-    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
+    def _build(self, ctx: Ctx, entry: str) -> tuple[list[Node], str]:
         nodes, reply = self._inner._build(ctx, entry)
         out = ctx.fresh("into")
         return [*nodes, _into_node(out, entry, reply, self._key)], out
@@ -170,7 +174,7 @@ class _Merge(Flow[dict, dict]):
     def __init__(self, inner: Flow[Any, Any]) -> None:
         self._inner = inner
 
-    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
+    def _build(self, ctx: Ctx, entry: str) -> tuple[list[Node], str]:
         nodes, reply = self._inner._build(ctx, entry)
         out = ctx.fresh("merge")
         return [*nodes, _merge_node(out, entry, reply)], out
@@ -187,11 +191,11 @@ class _Loop(Flow[Any, Any]):
         self._until = until
         self._budget = budget
 
-    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
+    def _build(self, ctx: Ctx, entry: str) -> tuple[list[Node], str]:
         name = ctx.fresh("loop")
         state = f"{name}:s"
         body_in, body_out = f"{name}:in", f"{name}:out"
-        body = self._body.system(entry=body_in, out=body_out, llm=ctx.llm)
+        body = self._body.system(entry=body_in, out=body_out, bind=ctx.bindings)
         round_term: Terminate = Goal(lambda v: v.exists(body_out))
         if self._budget is not None:
             round_term = any_of(round_term, Budget(self._budget))
@@ -213,7 +217,7 @@ class _Branch(Flow[Any, Any]):
         self._select = select
         self._cases = cases
 
-    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
+    def _build(self, ctx: Ctx, entry: str) -> tuple[list[Node], str]:
         name = ctx.fresh("branch")
         out = name
         ins = {k: f"{name}:in:{k}" for k in self._cases}
@@ -275,7 +279,7 @@ class _Gather(Flow[Any, Any]):
     def __init__(self, flows: tuple[Flow[Any, Any], ...]) -> None:
         self._flows = flows
 
-    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
+    def _build(self, ctx: Ctx, entry: str) -> tuple[list[Node], str]:
         out = ctx.fresh("gather")
         nodes: list[Node] = []
         srcs: list[str] = []
@@ -315,15 +319,17 @@ class _Nest(Flow[A, B]):
         self._until = until
         self._budget = budget
 
-    def _build(self, ctx: _Ctx, entry: str) -> tuple[list[Node], str]:
+    def _build(self, ctx: Ctx, entry: str) -> tuple[list[Node], str]:
         name = ctx.fresh("nest")
         inner_entry, inner_out = self._entry, self._out
         if isinstance(self._target, Flow):
-            system = self._target.system(entry=inner_entry, out=inner_out, llm=ctx.llm)
+            system = self._target.system(
+                entry=inner_entry, out=inner_out, bind=ctx.bindings
+            )
         elif isinstance(self._target, System):
             system = self._target
         else:  # a Board: compile with the flow's default llm as the fallback backend
-            system = self._target.compile(ctx.llm)
+            system = self._target.compile()
         until = self._until or Goal(lambda v: v.exists(inner_out))
         if self._budget is not None:
             until = any_of(until, Budget(self._budget))

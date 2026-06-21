@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -15,12 +15,12 @@ from fedotmas.engine.system import System
 from fedotmas.engine.terminate import Terminate
 
 if TYPE_CHECKING:
-    from fedotmas.sdk.atoms import LLM
+    from collections.abc import Mapping
 
 
 @dataclass
-class _Ctx:
-    llm: LLM | None = None
+class Ctx:
+    bindings: Mapping[str, Any] = field(default_factory=dict)
     n: int = 0
 
     def fresh(self, hint: str) -> str:

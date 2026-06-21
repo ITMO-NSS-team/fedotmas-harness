@@ -49,10 +49,13 @@ def compile(
     *,
     atoms: dict[str, Flow[Any, Any]] | None = None,
     types: dict[str, type] | None = None,
+    providers: dict[str, Any] | None = None,
 ) -> Flow[Any, Any]:
     """Turn a validated manifest into one Flow, deterministically: same document, same
-    graph. `atoms` fills ref: nodes, `types` names the takes/returns models; run
-    configuration (llm, budget, halt_on_error) stays at the call site."""
+    graph. `atoms` fills ref: nodes, `types` names the takes/returns models, `providers` maps a
+    node-kind to its builder -- prompt nodes (a bare string or a Prompted) need
+    providers["agent"], supplied by the LLM cartridge as fedotmas_llm.agent. Run configuration
+    (the llm via bind, budget, halt_on_error) stays at the call site."""
     if manifest.flow is None:
         raise ManifestError(
             [
@@ -63,7 +66,7 @@ def compile(
                 )
             ]
         )
-    compiler = _Compiler(manifest, atoms or {}, types or {})
+    compiler = _Compiler(manifest, atoms or {}, types or {}, providers or {})
     flow = compiler.run()
     if compiler.issues:
         raise ManifestError(compiler.issues)
@@ -76,10 +79,12 @@ class _Compiler:
         manifest: Manifest,
         atoms: dict[str, Flow[Any, Any]],
         types: dict[str, type],
+        providers: dict[str, Any],
     ) -> None:
         self.manifest = manifest
         self.atoms = atoms
         self.types = types
+        self.providers = providers
         self.issues: list[Issue] = []
         self.nodes: dict[str, Flow[Any, Any]] = {}
         self.spliced: dict[str, Flow[Any, Any]] = {}
@@ -95,7 +100,7 @@ class _Compiler:
     def node(self, name: str, d: NodeDef) -> Flow[Any, Any]:
         path = f"nodes.{name}"
         if isinstance(d, str):
-            return sdk.agent(name, prompt=d)
+            return self._agent(name, path, prompt=d)
         if isinstance(d, AtomRef):
             flow = self.atoms.get(d.ref)
             if flow is None:
@@ -110,13 +115,29 @@ class _Compiler:
             return flow
         takes = self.typeof(d.takes, f"{path}.takes", f"{name}.takes")
         if d.labels is not None:
-            return sdk.agent(
-                name, prompt=d.prompt, input=d.input, takes=takes, labels=list(d.labels)
+            return self._agent(
+                name,
+                path,
+                prompt=d.prompt,
+                input=d.input,
+                takes=takes,
+                labels=list(d.labels),
             )
         returns = self.typeof(d.returns, f"{path}.returns", f"{name}.returns")
-        return sdk.agent(
-            name, prompt=d.prompt, input=d.input, takes=takes, returns=returns
+        return self._agent(
+            name, path, prompt=d.prompt, input=d.input, takes=takes, returns=returns
         )
+
+    def _agent(self, name: str, path: str, **kw: Any) -> Flow[Any, Any]:
+        builder = self.providers.get("agent")
+        if builder is None:
+            self.fail(
+                path,
+                "prompt nodes need an 'agent' provider",
+                expected="compile(..., providers={'agent': fedotmas_llm.agent})",
+            )
+            return _invalid()
+        return builder(name, **kw)
 
     def typeof(self, ref: TypeRef | None, path: str, hint: str) -> type:
         if ref is None:
