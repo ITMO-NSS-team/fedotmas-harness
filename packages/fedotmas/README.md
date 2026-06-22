@@ -62,8 +62,11 @@ When there is no fixed pipeline, declare **rules** that fire when their inputs a
 ```python
 from fedotmas import Rule, blackboard
 
-async def score(draft, view): return len(draft.split())
-async def gate(n, view):      return "ship" if n >= 5 else "revise"
+async def score(draft, view):
+    return len(draft.split())
+
+async def gate(n, view):
+    return "ship" if n >= 5 else "revise"
 
 board = blackboard(
     Rule(name="score", reads="draft", writes="score", fn=score),
@@ -79,8 +82,7 @@ Flow and blackboard are two views of one store. `nest` drops a goal-terminating 
 A system can be a JSON document, compiled the same way every time. Code atoms are supplied by reference:
 
 ```python
-from fedotmas import dsl
-from fedotmas import action
+from fedotmas import dsl, action
 
 manifest = dsl.parse('{"version": 1, "nodes": {"score": {"ref": "score"}}, "flow": "score"}')
 flow = dsl.compile(manifest, atoms={"score": action(score)})
