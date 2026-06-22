@@ -33,12 +33,3 @@ uv sync --all-packages
 ## Articles
 
 - **Does going multi-agent pay off, and can you auto-pick a pattern per task?** · [EN](https://dev.to/enorth/does-going-multi-agent-pay-off-and-can-you-auto-pick-a-pattern-per-task-15ld) · [RU](https://habr.com/ru/articles/1047422/)
-
-
-## Planned
-
-- meta-agent M0: match a task to a pattern family, fill the roles, compile; the compiler acts as a deterministic critic
-- serving: run a manifest over HTTP/SSE and MCP (`fedotmas-llm`); MCP, file/URI, and A2A capabilities wired by reference
-- v0.2: wave epochs for joins, checkpoint-style resume/persistence
-- reliability: a middleware seam plus retry/fallback combinators
-- richer runtime memory (knowledge graphs) behind a store port
