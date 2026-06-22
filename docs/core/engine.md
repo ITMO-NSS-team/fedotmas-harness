@@ -4,7 +4,7 @@ The engine is the part of fedotmas that actually runs a multi-agent system.
 It has no notion of graphs, and none of what runs inside a node, be it a function, a remote service, or another system.
 It knows three things: a shared store of facts, a set of **nodes** that read and write those facts, and a loop that decides who runs next.
 
-Everything else in the framework (the DSL, the pattern presets) is a way to produce input for this engine.
+Everything else in the framework (the authoring surfaces, the pattern presets) is a way to produce input for this engine.
 If you understand the engine, you understand the runtime.
 For the bigger picture and how the authoring surfaces relate, see [Concepts](concepts.md).
 

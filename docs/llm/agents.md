@@ -1,7 +1,7 @@
 # Agents and rules
 
 The flow surface fills its arrows with `action` and the blackboard fills its rules with code.
-`fedotmas-llm` adds the model-backed counterparts: `agent` for a flow atom, `PromptRule` for a blackboard rule, and the `agent` provider for DSL prompt nodes.
+`fedotmas-llm` adds the model-backed counterparts: `agent` for a flow atom and `PromptRule` for a blackboard rule.
 
 ## agent
 
@@ -84,29 +84,3 @@ run = await investigation.run({"question": "what is it?"}, goal="conclusion", bi
 ```
 
 A board is model-free and takes no backend itself; the `llm` rides on each `PromptRule` or on the run-scoped `bind`.
-
-## DSL prompt nodes
-
-In the [DSL](../core/dsl.md), a node written as a bare string or a `{"prompt": ...}` object is a prompt node.
-`compile` builds it from `providers["agent"]`, which the extension supplies as `fedotmas_llm.agent`.
-
-```python
-from fedotmas.dsl import compile, parse
-from fedotmas_llm import agent
-
-doc = """
-{
-  "version": 1,
-  "nodes": {
-    "research": "Gather facts on {input}.",
-    "write": "Draft from the facts."
-  },
-  "flow": ["research", "write"]
-}
-"""
-
-flow = compile(parse(doc), providers={"agent": agent})
-run = await flow.run("tea", bind={"llm": backend})
-```
-
-A manifest with prompt nodes and no `agent` provider fails to compile, by message: prompt nodes need an `"agent"` provider.

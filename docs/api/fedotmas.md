@@ -1,6 +1,6 @@
 # fedotmas
 
-The core package: the authoring surfaces re-exported from the package root, the `engine` runtime, and the `dsl` document language.
+The core package: the authoring surfaces re-exported from the package root, and the `engine` runtime.
 
 ## fedotmas
 
@@ -9,7 +9,3 @@ The core package: the authoring surfaces re-exported from the package root, the 
 ## fedotmas.engine
 
 ::: fedotmas.engine
-
-## fedotmas.dsl
-
-::: fedotmas.dsl

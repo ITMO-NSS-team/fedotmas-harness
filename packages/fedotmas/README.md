@@ -1,6 +1,6 @@
 # fedotmas
 
-The core engine, a typed SDK, and a JSON DSL. A generic state machine with **no LLM vocabulary** and a single dependency (`pydantic`). Model-specific code lives in an extension like [`fedotmas-llm`](../fedotmas-llm); this package is what it builds on.
+The core engine and a typed SDK. A generic state machine with **no LLM vocabulary** and a single dependency (`pydantic`). Model-specific code lives in an extension like [`fedotmas-llm`](../fedotmas-llm); this package is what it builds on.
 
 The unit is an **atom**: a typed async step that reads an input and writes an output. Lift any function with `action`, then compose. A pure-code system binds nothing, so `run` takes only the input.
 
@@ -76,17 +76,6 @@ print(asyncio.run(board.run({"draft": "a quick brown fox jumps"}, goal="verdict"
 ```
 
 Flow and blackboard are two views of one store. `nest` drops a goal-terminating board into a flow as one node.
-
-## Systems as data (DSL)
-
-A system can be a JSON document, compiled the same way every time. Code atoms are supplied by reference:
-
-```python
-from fedotmas import dsl, action
-
-manifest = dsl.parse('{"version": 1, "nodes": {"score": {"ref": "score"}}, "flow": "score"}')
-flow = dsl.compile(manifest, atoms={"score": action(score)})
-```
 
 ## Extending the engine
 

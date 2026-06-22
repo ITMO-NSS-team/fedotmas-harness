@@ -1,7 +1,7 @@
 # Concepts
 
 fedotmas runs multi-agent systems on one small engine and gives you two ways to author for it.
-This page is the shared model and the map; the [engine](engine.md), [flow](flow.md), [blackboard](blackboard.md), and [DSL](dsl.md) pages are the detail.
+This page is the shared model and the map; the [engine](engine.md), [flow](flow.md), and [blackboard](blackboard.md) pages are the detail.
 
 ## One engine
 
@@ -32,8 +32,6 @@ There is no `A -> B` shape, so there is nothing to type.
 Use it when the width is decided at runtime, the next speaker is chosen by a manager, work is handed off dynamically, or a task is auctioned to the best bidder.
 
 `nest` is the seam between them: a goal-terminating blackboard (or a whole sub-flow) becomes one typed node of a flow, its interior opaque, its boundary checked.
-
-The **[DSL](dsl.md)** is the flow surface as a JSON document, so a program can emit a system instead of writing Python.
 
 ## When a flow is the wrong shape
 

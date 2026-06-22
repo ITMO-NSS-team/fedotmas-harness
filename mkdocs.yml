@@ -56,7 +56,6 @@ nav:
     - Engine: core/engine.md
     - Flow: core/flow.md
     - Blackboard: core/blackboard.md
-    - DSL: core/dsl.md
   - LLM extension:
     - Overview: llm/index.md
     - Agents & rules: llm/agents.md

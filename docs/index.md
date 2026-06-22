@@ -19,6 +19,5 @@ run = await vote.run("2 + 2", bind={"llm": some_llm})
     - [Engine](core/engine.md): the runtime, store, facts, nodes, supersteps, triggers, policy.
     - [Flow](core/flow.md): the typed arrow surface, atoms, operators, loops, nesting.
     - [Blackboard](core/blackboard.md): the rule surface for emergent, condition-driven activation.
-    - [DSL](core/dsl.md): the flow surface as a JSON document a program can emit.
 - **[LLM extension](llm/index.md)** adds the model-backed atoms: [agents and rules](llm/agents.md) over the `LLM` seam.
 - **API** is the generated reference for [fedotmas](api/fedotmas.md) and [fedotmas_llm](api/fedotmas_llm.md).

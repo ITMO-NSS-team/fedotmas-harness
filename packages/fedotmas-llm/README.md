@@ -75,24 +75,6 @@ board = blackboard(
 out = await board.run({"topic": "tea"}, goal="report", bind={"llm": backend})
 ```
 
-## Systems as data (DSL)
-
-A bare string node is a prompt. Pass the `agent` builder as the provider and the manifest compiles to the same flow:
-
-```python
-from fedotmas import dsl
-from fedotmas_llm import agent
-
-manifest = dsl.parse("""{
-  "version": 1,
-  "nodes": {"outline": "Give a 3-bullet outline for the topic.",
-            "draft": "Write one vivid paragraph from the outline."},
-  "flow": ["outline", "draft"]
-}""")
-flow = dsl.compile(manifest, providers={"agent": agent})
-run = await flow.run("tea", bind={"llm": backend})
-```
-
 ## Serving
 
 Run a manifest over HTTP/SSE and MCP under the `serve` extra (`pip install fedotmas-llm[serve]`). MCP, file/URI, and A2A capabilities wire by reference. Early.

@@ -26,7 +26,7 @@ uv sync --all-packages
 
 ## Packages
 
-- [`fedotmas`](packages/fedotmas): engine, typed SDK, and JSON DSL.
+- [`fedotmas`](packages/fedotmas): the engine and typed SDK.
 - [`fedotmas-llm`](packages/fedotmas-llm): the LLM extension. Agents, provider backends, serving. Early.
 - [`fedotmas-meta`](packages/fedotmas-meta): the meta-agent that builds systems from a task description. Early.
 
