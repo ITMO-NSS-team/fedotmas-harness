@@ -3,6 +3,7 @@ from typing import Literal
 
 from dotenv import load_dotenv
 from fedotmas import dsl
+from fedotmas_llm import agent
 from fedotmas_llm.adapters.pydantic_ai import PydanticAI
 from pydantic import BaseModel
 
@@ -71,6 +72,7 @@ MANIFEST = {
 swarm = dsl.compile(
     dsl.Manifest.model_validate(MANIFEST),
     types={"TriageNote": TriageNote, "BillingNote": BillingNote, "TechNote": TechNote},
+    providers={"agent": agent},
 )
 
 
@@ -81,7 +83,7 @@ async def main() -> None:
             "ticket": "I was double charged and now the app crashes on launch.",
             "station": "triage",
         },
-        llm=PydanticAI("openai-responses:gpt-4o-mini"),
+        bind={"llm": PydanticAI("openai-responses:gpt-4o-mini")},
         budget=12,
     )
     for r in run.steps:

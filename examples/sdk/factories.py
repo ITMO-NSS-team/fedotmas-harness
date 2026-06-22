@@ -1,8 +1,9 @@
 import asyncio
 from typing import Any
 
+from fedotmas import Flow, action, branch
 from fedotmas.engine.contract import View
-from fedotmas.sdk import Flow, action, agent, branch
+from fedotmas_llm import agent
 
 
 class FakeLLM:

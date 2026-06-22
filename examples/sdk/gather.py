@@ -1,8 +1,8 @@
 import asyncio
 from collections import Counter
 
+from fedotmas import action, gather
 from fedotmas.engine.contract import View
-from fedotmas.sdk import action, gather
 
 
 @action

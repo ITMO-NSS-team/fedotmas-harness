@@ -1,6 +1,6 @@
 import asyncio
 
-from fedotmas.sdk import Flow, action, gather
+from fedotmas import Flow, action, gather
 
 # The trailing `view` of an action body is optional: drop it when the body does not read
 # the store. Add `view: View` (from fedotmas.engine.contract) back when a body needs it.

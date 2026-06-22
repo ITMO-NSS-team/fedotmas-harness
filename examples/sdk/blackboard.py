@@ -1,7 +1,7 @@
 import asyncio
 
+from fedotmas import Rule, blackboard
 from fedotmas.engine.contract import View
-from fedotmas.sdk import Rule, blackboard
 
 
 async def hypothesize(input: object, view: View) -> str:

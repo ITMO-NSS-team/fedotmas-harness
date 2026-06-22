@@ -1,6 +1,6 @@
 import asyncio
 
-from fedotmas.sdk import action, branch
+from fedotmas import action, branch
 
 
 def classify(q: str) -> str:

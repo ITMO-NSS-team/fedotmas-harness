@@ -2,8 +2,9 @@ import asyncio
 from typing import Any
 
 from dotenv import load_dotenv
+from fedotmas import action, gather
 from fedotmas.engine.contract import View
-from fedotmas.sdk import action, agent, gather
+from fedotmas_llm import agent
 from fedotmas_llm.adapters.pydantic_ai import PydanticAI
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -51,7 +52,7 @@ TEXT = (
 
 async def main() -> None:
     run = await system.run(
-        TEXT, llm=PydanticAI("openai-responses:gpt-4o-mini"), budget=8
+        TEXT, bind={"llm": PydanticAI("openai-responses:gpt-4o-mini")}, budget=8
     )
     for r in run.steps:
         print(f"step {r.step}: {r.fired} -> {[f.tag for f in r.writes]}")

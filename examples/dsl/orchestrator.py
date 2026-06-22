@@ -1,9 +1,9 @@
 import asyncio
 
 from dotenv import load_dotenv
-from fedotmas import dsl
+from fedotmas import action, dsl
 from fedotmas.engine import View
-from fedotmas.sdk import action
+from fedotmas_llm import agent
 from fedotmas_llm.adapters.pydantic_ai import PydanticAI
 from pydantic import BaseModel
 
@@ -39,14 +39,19 @@ MANIFEST = {
 }
 
 orchestrator = dsl.compile(
-    dsl.Manifest.model_validate(MANIFEST), atoms={"work": work}, types={"Plan": Plan}
+    dsl.Manifest.model_validate(MANIFEST),
+    atoms={"work": work},
+    types={"Plan": Plan},
+    providers={"agent": agent},
 )
 
 
 async def main() -> None:
     load_dotenv()
     run = await orchestrator.run(
-        "plan a one-day launch for a small open-source library", llm=llm, budget=8
+        "plan a one-day launch for a small open-source library",
+        bind={"llm": llm},
+        budget=8,
     )
     for r in run.steps:
         print(f"step {r.step}: {r.fired} -> {[f.tag for f in r.writes]}")

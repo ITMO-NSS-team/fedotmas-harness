@@ -1,9 +1,8 @@
 import asyncio
 import json
 
-from fedotmas import dsl
+from fedotmas import action, dsl
 from fedotmas.engine import View
-from fedotmas.sdk import action
 
 
 @action

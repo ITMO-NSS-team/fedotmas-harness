@@ -4,8 +4,7 @@ import asyncio
 
 from dotenv import load_dotenv
 from fedotmas_llm.adapters.pydantic_ai import PydanticAI
-from fedotmas_meta.presets import get
-from fedotmas_meta.selector import select
+from fedotmas_meta import get, select
 
 TASK = "Should the city ban cars from the center? Give a balanced recommendation."
 
@@ -25,7 +24,7 @@ async def main() -> None:
     # the fill stage is the meta-agent's next job; this hand fill matches debate
     assert picked.pattern == "debate"
 
-    run = await get(picked.pattern).build(FILL).run(TASK, llm=llm)
+    run = await get(picked.pattern).build(FILL).run(TASK, bind={"llm": llm})
     print(run.value)
 
 

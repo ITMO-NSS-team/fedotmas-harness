@@ -1,7 +1,7 @@
 import asyncio
 
+from fedotmas import Flow, action
 from fedotmas.engine.contract import View
-from fedotmas.sdk import Flow, action
 
 THRESHOLD = 3
 

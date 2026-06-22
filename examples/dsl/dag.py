@@ -2,6 +2,7 @@ import asyncio
 
 from dotenv import load_dotenv
 from fedotmas import dsl
+from fedotmas_llm import agent
 from fedotmas_llm.adapters.pydantic_ai import PydanticAI
 
 MANIFEST = {
@@ -20,7 +21,7 @@ MANIFEST = {
     "flow": ["extract", "debate", "balance"],
 }
 
-dag = dsl.compile(dsl.Manifest.model_validate(MANIFEST))
+dag = dsl.compile(dsl.Manifest.model_validate(MANIFEST), providers={"agent": agent})
 
 TEXT = (
     "Multi-agent systems should be compiled from a declarative spec rather than "
@@ -30,7 +31,9 @@ TEXT = (
 
 async def main() -> None:
     load_dotenv()
-    run = await dag.run(TEXT, llm=PydanticAI("openai-responses:gpt-4o-mini"), budget=8)
+    run = await dag.run(
+        TEXT, bind={"llm": PydanticAI("openai-responses:gpt-4o-mini")}, budget=8
+    )
     for r in run.steps:
         print(f"step {r.step}: {r.fired} -> {[f.tag for f in r.writes]}")
     print("reason:", run.reason)
