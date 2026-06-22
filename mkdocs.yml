@@ -19,6 +19,8 @@ theme:
   features:
     - content.code.copy
     - content.code.annotate
+    - navigation.sections
+    - navigation.indexes
     - navigation.top
     - toc.follow
   icon:
@@ -35,10 +37,29 @@ markdown_extensions:
   - toc:
       permalink: true
 
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [packages/fedotmas/src, packages/fedotmas-llm/src]
+          options:
+            show_root_heading: true
+            show_source: false
+            heading_level: 3
+            members_order: source
+
 nav:
   - Home: index.md
-  - Concepts: concepts.md
-  - Engine: engine.md
-  - Flow: flow.md
-  - Blackboard: blackboard.md
-  - DSL: dsl.md
+  - Core:
+    - Concepts: core/concepts.md
+    - Engine: core/engine.md
+    - Flow: core/flow.md
+    - Blackboard: core/blackboard.md
+    - DSL: core/dsl.md
+  - LLM extension:
+    - Overview: llm/index.md
+    - Agents & rules: llm/agents.md
+  - API:
+    - fedotmas: api/fedotmas.md
+    - fedotmas_llm: api/fedotmas_llm.md
