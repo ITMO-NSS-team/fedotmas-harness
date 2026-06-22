@@ -6,9 +6,11 @@ Not every system is an arrow. When activation is opportunistic, when agents fire
 order as the store happens to satisfy them, there is no `A -> B` shape to type. For that the SDK
 has a second surface: the blackboard.
 
-A rule is a self-activating node: a condition paired with a step. The step is code (`fn`) or,
-like the agent atom, a prompt: `prompt` plus an optional `input` template rendered over the
-rule's input with store tags as fallback, exactly one of the two. For the common produce-once
+A rule is a self-activating node: a condition paired with a step. The step is code, the core
+`Rule` carrying an `fn`, or a prompt, the `PromptRule` in the `fedotmas_llm` extension carrying
+a `prompt` plus an optional `input` template rendered over the rule's input with store tags as
+fallback. That is the same code-or-prompt split `action` and `agent` draw on the flow surface.
+For the common produce-once
 shape the condition is derived from `reads` and `writes` (fire when the read fact is present
 and the written one is not yet), so a pipeline rule needs no trigger. You write `when` only
 when activation is genuinely opportunistic, several rules contending on one fact, or a
@@ -20,43 +22,46 @@ view (or pulls them into an `input` template by tag).
 
 ```python
 @dataclass
-class Rule:
+class Rule:                                         # fedotmas: a code rule
     name: str
-    fn: StepFn | None = None                       # code step...
+    fn: StepFn | None = None                       # code step: async (input) or (input, view)
     writes: str = ""
     reads: str = ""
     when: Callable[[View], bool] | Sequence[str] | None = None   # defaults to produce-once
-    meta: dict = field(default_factory=dict)       # rides to the agent, e.g. an auction bid
-    prompt: str | None = None                      # ...or a prompt step over the LLM seam
+    meta: dict = field(default_factory=dict)       # rides to the node, e.g. an auction bid
+
+
+@dataclass
+class PromptRule(Rule):                            # fedotmas_llm: a prompt rule
+    prompt: str | None = None                      # the static system prompt
     input: str | None = None                       # template for what the model sees
     returns: Any = str                             # the prompt step's output type
     llm: LLM | None = None                         # per-rule backend override
 
 
-def blackboard(*rules: Rule, llm: LLM | None = None) -> Board: ...
+def blackboard(*rules: Rule) -> Board: ...
 ```
 
-`blackboard` assembles rules into a `Board`, and `llm` is the default backend for prompt rules
-that did not bind their own (a prompt rule with no backend from either level fails here, by
-name). A board runs symmetrically with a flow: `board.run(seed, goal=...)` takes the seed
-facts as a tag -> value dict and the tag to read the result back from, and returns the same
-`Outcome`; `board.stream` is the same run yielded step by step. An `llm` passed at
-`board.run(...)` is the last-resort backend, behind the board default and the per-rule
-binding, and `halt_on_error=False` works the same as on `Flow.run`. `board.system` is the
-raw engine `System` when you want executor-level control. A
-linear investigation is prompts all the way down and writes no triggers:
+`blackboard` assembles rules into a `Board`; it is model-free and takes no backend itself. A
+board runs symmetrically with a flow: `board.run(seed, goal=..., bind={"llm": ...})` takes the
+seed facts as a tag -> value dict, the tag to read the result back from, and the run-scoped
+`bind` whose `llm` key is the default backend for prompt rules that did not bind their own (a
+`PromptRule` with no backend from either level fails by name). It returns the same `Outcome`;
+`board.stream` is the same run yielded step by step, and `halt_on_error=False` works the same
+as on `Flow.run`. `board.system` is the raw engine `System` when you want executor-level
+control. A linear investigation is prompts all the way down and writes no triggers:
 
 ```python
-from fedotmas.sdk import Rule, blackboard
+from fedotmas import blackboard
+from fedotmas_llm import PromptRule
 
 investigation = blackboard(
-    Rule("hypothesizer", prompt="Propose one testable hypothesis.", reads="question", writes="hypothesis"),
-    Rule("researcher",   prompt="State one supporting piece of evidence.", reads="hypothesis", writes="evidence"),
-    Rule("verifier",     prompt="Weigh and conclude in one line.", reads="evidence", writes="conclusion"),
-    llm=some_llm,
+    PromptRule("hypothesizer", prompt="Propose one testable hypothesis.", reads="question", writes="hypothesis"),
+    PromptRule("researcher",   prompt="State one supporting piece of evidence.", reads="hypothesis", writes="evidence"),
+    PromptRule("verifier",     prompt="Weigh and conclude in one line.", reads="evidence", writes="conclusion"),
 )
 
-run = await investigation.run({"question": "what is it?"}, goal="conclusion")
+run = await investigation.run({"question": "what is it?"}, goal="conclusion", bind={"llm": some_llm})
 ```
 
 Because a rule's `input` template falls back to store tags, a rule that weighs several facts
@@ -110,9 +115,10 @@ contract-net puts the bid on the bidder: `AuctionSelect(key=lambda n, v: n.descr
 
 | Import | What it is |
 |--------|------------|
-| `sdk.Rule` | a self-activating node: code (`fn`) or prompt (`prompt`/`input`/`returns`), plus `writes`/`reads`, optional `when` (tag sequence, `!` for absent) and `meta` |
-| `sdk.blackboard` | assemble rules into a `Board`: `.run(seed, goal=...)`, `.stream`, `.system`, default `llm` for prompt rules |
-| `sdk.Board` | the assembled blackboard; `.run` is symmetric with `Flow.run` and returns an `Outcome` |
+| `Rule` | a self-activating code node: `fn`, plus `writes`/`reads`, optional `when` (tag sequence, `!` for absent) and `meta` |
+| `PromptRule` (`fedotmas_llm`) | the prompt counterpart: `prompt`/`input`/`returns`/`llm` over the LLM seam, with `reads`/`writes`/`when`/`meta` as on `Rule` |
+| `blackboard` | assemble rules into a `Board`: `.run(seed, goal=..., bind=...)`, `.stream`, `.system` |
+| `Board` | the assembled blackboard; `.run` is symmetric with `Flow.run` and returns an `Outcome` |
 
 Things to keep in mind:
 

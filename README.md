@@ -12,11 +12,7 @@
 > [!WARNING]
 > Early development (v0.1). The API will change between versions.
 
-A typed dataflow engine for systems that build up a shared state. A thin LLM layer on top turns it into a multi-agent framework.
-
-## Approach
-
-The idea behind the engine is that typed atoms read from and write to a shared memory, scheduled in supersteps until a goal is reached. The core `fedotmas` has no LLM vocabulary and no heavy dependencies. Model-specific code lives in an extension, built on the core's public API. `fedotmas-llm` adds agents, provider backends, and serving, and the engine still never names a model.
+A tiny typed dataflow engine for systems that build up a shared state. A thin LLM layer on top turns it into a multi-agent framework.
 
 ## Install
 
@@ -24,7 +20,7 @@ Install from git with [uv](https://docs.astral.sh/uv/):
 
 ```bash
 git clone https://github.com/ITMO-NSS-team/fedotmas-harness.git
-cd fedotmas
+cd fedotmas-harness
 uv sync --all-packages
 ```
 

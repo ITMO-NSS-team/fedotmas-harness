@@ -159,8 +159,8 @@ def stable_oracle(ms: list[dict]) -> float:
 
 def selector_row(m: dict, model: str) -> tuple[str, float, float, float | None]:
     from fedotmas_llm.adapters.pydantic_ai import PydanticAI
+    from fedotmas_meta import select
     from fedotmas_meta.presets import get
-    from fedotmas_meta.selector import select
 
     load_dotenv(Path(__file__).parents[1] / ".env")
     llm = PydanticAI(model)

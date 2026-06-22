@@ -24,7 +24,7 @@ type of each stage has to match the input type of the next, and that is the whol
 ```python
 import asyncio
 
-from fedotmas.sdk import action
+from fedotmas import action
 
 
 @action
@@ -67,7 +67,7 @@ value across. That alias is the only bookkeeping the boundary costs.
 
 ## Running a flow
 
-`run(value, *, llm=None, budget=100, policy=None, halt_on_error=True)` compiles the flow,
+`run(value, *, bind=None, budget=100, policy=None, halt_on_error=True)` compiles the flow,
 seeds the input, executes to "the output exists" (capped by `budget` supersteps; the default
 100 is a runaway guard for loops that never satisfy their `until`, pass `budget=None` to
 lift it), and returns an `Outcome`:
@@ -93,7 +93,8 @@ run can still reach `reason="goal"` with `errors` non-empty, and `ok` stays Fals
 way.
 
 `stream(value, ...)` is the same call as an async iterator of `StepReport`, for watching the
-run unfold live. The `llm` argument is the default backend for every LLM node, covered next.
+run unfold live. The `bind` mapping carries run-scoped defaults, its `llm` key being the
+default backend for every LLM node, covered next.
 
 When you need to own the store, the seed facts, or the terminate condition, drop to the
 explicit seam: `.system(entry, out)` compiles the flow to an engine `System`, and you hand it
@@ -129,8 +130,9 @@ lifting a lambda.
 
 ### agent
 
-`agent` lifts a prompt. The behavior is data, not code, which is what lets an LLM node be
-authored without hand-writing a model call.
+`agent` lifts a prompt; it lives in the `fedotmas_llm` extension (`from fedotmas_llm import
+agent`), since the core engine stays model-free. The behavior is data, not code, which is what
+lets an LLM node be authored without hand-writing a model call.
 
 ```python
 def agent(
@@ -230,8 +232,8 @@ group-chat manager writing who speaks next, compose:
 
 ### LLM
 
-`agent` is agnostic about how a prompt turns into a value. That seam is one protocol, and it
-is a parameter of the factory, not a way into the engine.
+`agent` is agnostic about how a prompt turns into a value. That seam is one protocol
+(`fedotmas_llm.LLM`), and it is a parameter of the factory, not a way into the engine.
 
 ```python
 class LLM(Protocol):
@@ -248,8 +250,9 @@ atom, an `agent` is the same atom shape with an `LLM` behind it, and the two com
 distinction.
 
 The binding has two levels. A node can carry its own backend (`llm=` on the factory), and a
-whole composition gets a default at the boundary: `.system(entry, out, llm=...)` or
-`.run(value, llm=...)`. Per-node bindings win, so a flow can run one node on a different
+whole composition gets a default at the boundary, the `llm` key of the run-scoped `bind`
+mapping: `.system(entry, out, bind={"llm": ...})` or `.run(value, bind={"llm": ...})`. Per-node
+bindings win, so a flow can run one node on a different
 model and the rest on the default. A node with no backend from either level fails at compile
 time, with its name in the message, never mid-run.
 
@@ -282,7 +285,7 @@ There is no separate join operator. The join is an ordinary next stage that cons
 ```python
 from collections import Counter
 
-from fedotmas.sdk import action, gather
+from fedotmas import action, gather
 
 
 @action
@@ -334,7 +337,7 @@ fails the route node with the label and the case set in the message. Each case i
 `Flow[A, B]`, which means a case can itself be a chain, a parallel block, or another branch.
 
 ```python
-from fedotmas.sdk import action, branch
+from fedotmas import action, branch
 
 
 def classify(q: str) -> str:
@@ -476,7 +479,7 @@ interrupt it; `budget` caps the inner supersteps instead (`None` lifts it). An i
 halts the inner run and surfaces as this node's error fact.
 
 ```python
-from fedotmas.sdk import Flow, Rule, action, blackboard, nest
+from fedotmas import Flow, Rule, action, blackboard, nest
 
 investigation = blackboard(
     Rule("hypothesizer", hypothesize, writes="hypothesis", reads="question"),
@@ -505,8 +508,8 @@ conclusion inside its own store and surfaced one fact. That is why `solve` drops
 
 Two things about `nest`. First, it takes a `Board`, a raw `System`, or a `Flow`, so it is also
 the primitive for nesting one flow inside another as a self-contained unit, not only for
-absorbing a blackboard; a `Flow` or `Board` target picks up the outer flow's default `llm` as
-its fallback backend, while a `System` is already compiled and keeps its own bindings.
+absorbing a blackboard; a `Flow` or `Board` target picks up the outer flow's run-scoped `bind`
+as its fallback backend, while a `System` is already compiled and keeps its own bindings.
 Second, because the wrapped target has no static arrow type, the
 checker cannot infer the boundary types. You annotate them yourself
 (`solve: Flow[str, str] = nest(...)`), and that annotation is load-bearing: it is what the
@@ -517,26 +520,26 @@ checker uses to verify the stitch on either side. Feed a `str` into a flow built
 
 | Import                       | What it is                                                   |
 |------------------------------|--------------------------------------------------------------|
-| `sdk.Flow`                   | the typed arrow `Flow[A, B]`, a lazy dataflow fragment        |
-| `sdk.action`                 | wrap a typed async function as a mechanical atom              |
-| `sdk.agent`                  | lift a prompt into an LLM atom; `input` template, `labels` classifier |
-| `sdk.LLM`                    | the LLM seam, one async `complete(prompt, input, view, returns)` |
-| `sdk.Condition`              | a declarative predicate over one state key, for `.loop` (data, not code) |
+| `Flow`                       | the typed arrow `Flow[A, B]`, a lazy dataflow fragment        |
+| `action`                     | wrap a typed async function as a mechanical atom              |
+| `agent` (`fedotmas_llm`)     | lift a prompt into an LLM atom; `input` template, `labels` classifier |
+| `LLM` (`fedotmas_llm`)       | the LLM seam, one async `complete(prompt, input, view, returns)` |
+| `Condition`                  | a declarative predicate over one state key, for `.loop` (data, not code) |
 | `Flow.__add__` (`+`)         | sequence, `Flow[A, B] + Flow[B, C] -> Flow[A, C]`             |
-| `sdk.gather`                 | parallel, `*Flow[A, B] -> Flow[A, list[B]]`                  |
-| `sdk.branch`                 | route to one case by a label: callable, state key, or a labels agent |
+| `gather`                     | parallel, `*Flow[A, B] -> Flow[A, list[B]]`                  |
+| `branch`                     | route to one case by a label: callable, state key, or a labels agent |
 | `Flow.loop`                  | iterate a state-preserving flow until a callable, state key, or `Condition` clears; `budget=` caps one round |
 | `Flow.into` / `Flow.merge`   | thread a dict state past a step: output under one key / structured output folded in |
-| `sdk.nest`                   | run a whole sub-system (`Board`, `System`, or `Flow`) as one typed node; `budget=` caps its inner run |
-| `Flow.system`                | compile to a runnable `System`, given `entry`/`out` tags and a default `llm` |
+| `nest`                       | run a whole sub-system (`Board`, `System`, or `Flow`) as one typed node; `budget=` caps its inner run |
+| `Flow.system`                | compile to a runnable `System`, given `entry`/`out` tags and a default backend via `bind` |
 | `Flow.run` / `Flow.stream`   | compile and execute on one input; returns `Outcome` / yields `StepReport` |
-| `sdk.Outcome`                | the outcome: `.value`, `.ok`, `.reason`, `.errors`, `.steps`, `.unwrap()` |
-| `Outcome.unwrap` / `sdk.RunError` | return the value, or raise `RunError` if the run did not finish clean |
+| `Outcome`                    | the outcome: `.value`, `.ok`, `.reason`, `.errors`, `.steps`, `.unwrap()` |
+| `Outcome.unwrap` / `RunError` | return the value, or raise `RunError` if the run did not finish clean |
 
-Everything above re-exports from `fedotmas.sdk`. Two surfaces (`flow`, `blackboard`) filled by
-two atoms (`action` is code, `agent` is a model call). Flat imports are safe, no name shadows
-a stdlib import; `from fedotmas import sdk` with the `sdk.` prefix is available if you want
-explicit provenance.
+Everything above re-exports from the `fedotmas` package root, except `agent` and `LLM`, which
+live in the `fedotmas_llm` extension since the core engine stays model-free. Two surfaces
+(`flow`, `blackboard`) filled by two atoms: `action` is code in core, `agent` is a model call
+in the extension.
 
 Things to keep in mind:
 

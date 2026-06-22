@@ -6,6 +6,7 @@ together; `compile` turns it into a `Flow` you run exactly like a hand-built one
 
 ```python
 from fedotmas.dsl import parse, compile
+from fedotmas_llm import agent
 
 doc = """
 {
@@ -18,8 +19,8 @@ doc = """
 }
 """
 
-flow = compile(parse(doc))
-run = await flow.run("tea", llm=some_llm)
+flow = compile(parse(doc), providers={"agent": agent})
+run = await flow.run("tea", bind={"llm": some_llm})
 ```
 
 ## The document
@@ -54,14 +55,16 @@ Branch routes by a state key only (never by node name). A loop's `until` is a st
 def compile(
     manifest: Manifest,
     *,
-    atoms: dict[str, Flow] | None = None,   # bodies for "ref" nodes
-    types: dict[str, type] | None = None,   # named types for takes/returns
+    atoms: dict[str, Flow] | None = None,        # bodies for "ref" nodes
+    types: dict[str, type] | None = None,        # named types for takes/returns
+    providers: dict[str, Any] | None = None,     # node-kind builders, e.g. {"agent": agent}
 ) -> Flow: ...
 ```
 
 Registries are compile parameters, not document content: a `{"ref": "bump"}` node is filled
-from `atoms={"bump": action(bump)}`, and a `takes`/`returns` naming a registered type is
-resolved from `types`. The compile is deterministic and all-or-nothing: the same document
+from `atoms={"bump": action(bump)}`, a `takes`/`returns` naming a registered type is resolved
+from `types`, and a prompt node (a bare string or a `{"prompt": ...}` object) is built by
+`providers["agent"]`, supplied by the LLM extension as `fedotmas_llm.agent`. The compile is deterministic and all-or-nothing: the same document
 gives the same `Flow`, and a single document compiles to a single graph or to nothing.
 
 ## Parse, validate, merge
@@ -102,7 +105,7 @@ The grammar ships as JSON Schema, the form you hand to an emitting model:
 |--------|------------|
 | `dsl.Manifest` | the document: `nodes`, `flows`, `flow`, `version`, optional `meta` |
 | `dsl.parse` | JSON text to a validated `Manifest`, or `ManifestError` |
-| `dsl.compile` | `Manifest` to a `Flow`; `atoms` and `types` registries are parameters |
+| `dsl.compile` | `Manifest` to a `Flow`; `atoms`, `types`, `providers` registries are parameters |
 | `dsl.merge` | overlay staged parts into one manifest |
 | `dsl.manifest_schema` / `dsl.schema_for_flow` | the grammar as JSON Schema |
 | `dsl.ManifestError` / `dsl.Issue` | the failure contract: `(path, message, expected)` |

@@ -8,7 +8,8 @@ from functools import partial
 from typing import Any, get_args
 
 from deepeval.models import DeepEvalBaseLLM
-from fedotmas.sdk import LLM, Flow
+from fedotmas import Flow
+from fedotmas_llm import LLM
 
 _NUM = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
 
@@ -62,7 +63,7 @@ class FlowModel(DeepEvalBaseLLM):
         return self.flow
 
     async def a_generate(self, prompt: str) -> str:
-        run = await self.flow.run(prompt, llm=self.llm)
+        run = await self.flow.run(prompt, bind={"llm": self.llm})
         if not run.ok:
             self.failures += 1
             detail = str(run.errors[0].value) if run.errors else run.reason

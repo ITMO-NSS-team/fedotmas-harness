@@ -6,10 +6,11 @@ dataflow, and a **blackboard** of self-activating rules for opportunistic work. 
 to the same superstep executor.
 
 ```python
-from fedotmas.sdk import agent, gather
+from fedotmas import gather
+from fedotmas_llm import agent
 
 vote = gather(solver_a, solver_b, solver_c) + majority   # self-consistency
-run = await vote.run("2 + 2", llm=some_llm)
+run = await vote.run("2 + 2", bind={"llm": some_llm})
 ```
 
 ## Where to go
