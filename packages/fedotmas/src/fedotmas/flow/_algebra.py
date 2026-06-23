@@ -22,7 +22,7 @@ from fedotmas.flow._nodes import (
     _loop_iterate_node,
     _merge_node,
 )
-from fedotmas.flow._outcome import Outcome
+from fedotmas._outcome import Outcome
 
 if TYPE_CHECKING:
     from fedotmas.blackboard import Board

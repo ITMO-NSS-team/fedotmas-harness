@@ -1,17 +1,30 @@
-# Contract-first (TDD red): this pins the serialize / deserialize API before it exists.
-# `fedotmas.serialize` is intentionally unimplemented, so the import below does not resolve
-# and the type-checker flags it. That is the point: this file is the executable spec the
-# module must satisfy, written before a line of it.
+# flow surface (flow = research + write); entry/out are the default ports "in"/"out", and the
+# wiring between leaves is implied by `seq`, not stored as tags:
+#   {
+#     "surface": "flow", "entry": "in", "out": "out",
+#     "root": {"op": "seq", "steps": [
+#       {"op": "leaf", "kind": "action", "name": "research", "ref": "research"},
+#       {"op": "leaf", "kind": "action", "name": "write", "ref": "write"}
+#     ]},
+#     "requires": ["research", "write"]
+#   }
 #
-# Proposed surface, three names:
-#   to_manifest(obj)         Flow | Board -> Manifest   the authored system, as data
-#   from_manifest(manifest)  Manifest -> Flow | Board   the authored system, rebuilt
-#   Manifest                 a pydantic model; JSON is native (.model_dump_json / .model_validate_json)
+# board surface (the two rules below); a missing `when` means produce-once, `goal` is the target
+# tag, `when` keeps the engine's own ["tag", "!absent"] syntax:
+#   {
+#     "surface": "board", "goal": "verdict",
+#     "rules": [
+#       {"name": "score", "reads": "draft", "writes": "score",
+#        "body": {"kind": "action", "ref": "score"}},
+#       {"name": "gate", "reads": "score", "writes": "verdict",
+#        "when": ["score", "!verdict"],
+#        "body": {"kind": "action", "ref": "gate"}}
+#     ],
+#     "requires": ["score", "gate"]
+#   }
 #
-# The law: from_manifest(to_manifest(x)) runs the same as x. Code bodies cannot be serialized, so
-# to_manifest turns each leaf body into a by-ref key (its node name), collected in manifest.requires;
-# the rebuilt system re-binds them at run via bind=. So a pure-code flow that bound nothing needs
-# bind after a round-trip: that asymmetry is the logical / physical seam made visible.
+# Open field decision (flagged, not locked): whether entry/out (flow) and goal (board) live in the
+# manifest as shown, or stay run-args passed to .run().
 
 import asyncio
 
