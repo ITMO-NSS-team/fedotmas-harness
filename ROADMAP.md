@@ -3,8 +3,9 @@
 ## Now (v0.1)
 - wave epochs for joins
 - checkpoint-style resume and persistence
-- DSL extension seam: open node kinds, per-node params, and metadata
+- system serialize module
 - LLM capabilities: tools (MCP), file/URI reads, agent-to-agent calls, bound by reference. serving: a manifest over HTTP/SSE; a system as an MCP tool or A2A agent
+- meta-agent sgr for building MAS
 
 ## Next (v0.2)
 - reliability: a middleware seam plus retry and fallback combinators
