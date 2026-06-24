@@ -1,5 +1,9 @@
 """Run the pattern x benchmark matrix; one JSON record file per configuration.
 
+Temporarily unavailable: the flow patterns (single/chain/debate/eval_optimizer/orchestrator/
+router) were removed during the dsl refactor, so only the blackboard pattern resolves. Check
+out commit 2bd05ed to run the full matrix.
+
 A benchmark is a folder exposing suite(n, seed) and FILLS (see gsm8k/). The model is
 a full pydantic-ai spec: openai-responses:gpt-4o-mini, openrouter:qwen/qwen3-30b, ...
 Usage:

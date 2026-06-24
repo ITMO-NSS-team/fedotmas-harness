@@ -1,4 +1,4 @@
-"""The selector: a constrained pick over the catalog menu."""
+"""The selector: a constrained pick over the catalog menu (one family while presets refactor)."""
 
 from typing import Any
 
@@ -18,8 +18,8 @@ class FakeLLM:
 
 
 async def test_select_returns_a_catalog_pattern():
-    picked = await select("handle tickets", llm=FakeLLM(lambda p, i: "router"))
-    assert picked.pattern == "router"
+    picked = await select("settle a question", llm=FakeLLM(lambda p, i: "blackboard"))
+    assert picked.pattern == "blackboard"
     assert get(picked.pattern).roles
 
 
@@ -28,20 +28,7 @@ async def test_select_menu_lists_every_hint():
 
     def reply(p, i):
         seen["prompt"] = p
-        return "single"
+        return "blackboard"
 
     await select("t", llm=FakeLLM(reply))
     assert all(f"- {p.name}: {p.hint}" in seen["prompt"] for p in catalog())
-
-
-async def test_select_narrows_to_a_given_pool():
-    pool = [get("single"), get("chain")]
-    seen = {}
-
-    def reply(p, i):
-        seen["prompt"] = p
-        return "chain"
-
-    picked = await select("t", llm=FakeLLM(reply), presets=pool)
-    assert picked.pattern == "chain"
-    assert "debate" not in seen["prompt"]
