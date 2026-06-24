@@ -12,7 +12,7 @@
 > [!WARNING]
 > Early development (v0.1). The API will change between versions.
 
-A tiny typed dataflow engine for systems that build up a shared state. A thin LLM layer on top turns it into a multi-agent framework.
+A tiny typed dataflow engine for systems that build up a shared state, and the harness that orchestrates the agents inside them. Bring agents from any framework, mix them with plain code and raw model calls, and run them as one typed system instead of gluing them together by hand. A thin LLM layer (PydanticAI by default) on top turns it into a multi-agent framework.
 
 ## Install
 

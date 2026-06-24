@@ -1,7 +1,5 @@
 # Results
 
-> **Regenerating these results is temporarily unavailable** during the dsl/serialization refactor: the dsl-based flow patterns were removed from `fedotmas_meta.presets`. Check out commit `2bd05ed` (the last with the dsl) to re-run `benchmarks/run_matrix.py`; the numbers below were produced there.
-
 n = 100, seed = 7, 3 runs per cell (mean±sd). Executor = model column. Selector judge = fixed gpt-4o-mini. Random = analytic expected accuracy of a uniform pattern pick. Best fixed = the single best pattern's mean accuracy (one pattern committed across runs). Oracle per-task = stable per-item argmax across runs. MathQA absolute accuracy is capped (~20% of items carry a 5th option the scoring schema cannot express).
 
 ## Accuracy
