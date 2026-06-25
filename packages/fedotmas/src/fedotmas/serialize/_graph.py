@@ -4,31 +4,7 @@ from pydantic import BaseModel, Field
 
 from fedotmas.engine.report import Run
 from fedotmas.engine.system import System
-
-
-def _kind(name: str) -> str:
-    """Best-effort node kind read off the compiled name scheme. A diagnostic label only:
-    authoritative kinds arrive once nodes self-describe."""
-    for mark, kind in (
-        (":route", "branch.route"),
-        (":join:", "branch.join"),
-        (":iter", "loop.iter"),
-        (":done", "loop.done"),
-    ):
-        if mark in name:
-            return kind
-    if name.startswith("alias:"):
-        return "alias"
-    if "#" in name:
-        head = name.split("#", 1)[0]
-        return head if head in {"gather", "into", "merge", "nest"} else "action"
-    return "rule"
-
-
-def _matches(tag: str, pattern: str) -> bool:
-    if pattern.endswith("*"):
-        return tag.startswith(pattern[:-1])
-    return tag == pattern
+from fedotmas.serialize._dataflow import _edges
 
 
 class GraphNode(BaseModel):
@@ -55,10 +31,10 @@ class Graph(BaseModel):
 
 
 def to_graph(system: System, run: Run) -> Graph:
-    """Project a finished run to its dataflow graph. Node reads come from the System, writes
-    and firing counts from the run's step trace; an edge means a node's observed write matched
-    another node's read pattern. Read-only and surface-agnostic; pass `outcome.run` for the run.
-    """
+    """Project a finished run to its dataflow graph. Node kind/reads come from each node's
+    self-description, writes and firing counts from the run's step trace; an edge means a
+    node's observed write matched another node's read pattern. Read-only and surface-agnostic;
+    pass `outcome.run` for the run."""
     produced: dict[str, set[str]] = {}
     fired: dict[str, int] = {}
     for report in run.steps:
@@ -67,25 +43,20 @@ def to_graph(system: System, run: Run) -> Graph:
         for fact in report.writes:
             produced.setdefault(fact.producer, set()).add(fact.tag)
 
-    nodes = [
-        GraphNode(
-            name=n.name,
-            kind=_kind(n.name),
-            reads=n.reads.split(),
-            writes=sorted(produced.get(n.name, set())),
-            fired=fired.get(n.name, 0),
-        )
-        for n in system.nodes
-    ]
-
-    writers = [(src, tag) for src, tags in produced.items() for tag in tags]
-    seen: set[tuple[str, str, str]] = set()
-    edges: list[GraphEdge] = []
+    nodes: list[GraphNode] = []
+    specs: list[tuple[str, list[str], list[str]]] = []
     for n in system.nodes:
-        for pattern in n.reads.split():
-            for src, tag in writers:
-                key = (src, n.name, pattern)
-                if src != n.name and key not in seen and _matches(tag, pattern):
-                    seen.add(key)
-                    edges.append(GraphEdge(src=src, dst=n.name, via=pattern))
+        reads = n.reads.split()
+        writes = sorted(produced.get(n.name, set()))
+        nodes.append(
+            GraphNode(
+                name=n.name,
+                kind=n.describe().kind,
+                reads=reads,
+                writes=writes,
+                fired=fired.get(n.name, 0),
+            )
+        )
+        specs.append((n.name, reads, writes))
+    edges = [GraphEdge(src=s, dst=d, via=v) for s, d, v in _edges(specs)]
     return Graph(nodes=nodes, edges=edges)

@@ -11,6 +11,23 @@ class Status(str, Enum):
     ERROR = "error"
 
 
+class Kind(str, Enum):
+    """The closed set of floor node-kinds a Card declares. Extensions add their own kind
+    strings (Card.kind stays an open `str`); these are the ones the core surfaces stamp."""
+
+    ACTION = "action"
+    GATHER = "gather"
+    INTO = "into"
+    MERGE = "merge"
+    ALIAS = "alias"
+    NEST = "nest"
+    RULE = "rule"
+    BRANCH_ROUTE = "branch.route"
+    BRANCH_JOIN = "branch.join"
+    LOOP_ITER = "loop.iter"
+    LOOP_DONE = "loop.done"
+
+
 Key = tuple[str, int, str]
 
 
@@ -34,12 +51,20 @@ class Fact(BaseModel):
 
 
 class Card(BaseModel):
-    """A node's self-description for introspection: its name, doc, and meta (e.g. an auction
-    bid a Policy reads back)."""
+    """A node's self-description for introspection: name, doc, meta (e.g. an auction bid a
+    Policy reads back), and the declarative portrait the executor never reads: kind, reads,
+    writes, params. Factories stamp what they already hold; the engine still learns real writes
+    by running, so a Card declares but is never trusted (see serialize.to_blueprint). `system`
+    holds a live sub-system (nest, loop) for a walker to recurse into, excluded from dumps."""
 
     name: str
     description: str = ""
     meta: dict[str, Any] = Field(default_factory=dict)
+    kind: str = Kind.ACTION
+    reads: list[str] = Field(default_factory=list)
+    writes: list[str] = Field(default_factory=list)
+    params: dict[str, Any] = Field(default_factory=dict)
+    system: Any = Field(default=None, exclude=True)
 
 
 class Result(BaseModel):

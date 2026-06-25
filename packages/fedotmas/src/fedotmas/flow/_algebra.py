@@ -4,7 +4,8 @@ from collections.abc import AsyncIterator, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from fedotmas._inject import bind_pred
-from fedotmas.engine.contract import Fact, Node, Result, View
+from fedotmas._outcome import Outcome
+from fedotmas.engine.contract import Fact, Kind, Node, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.node import as_node
 from fedotmas.engine.report import StepReport
@@ -22,7 +23,6 @@ from fedotmas.flow._nodes import (
     _loop_iterate_node,
     _merge_node,
 )
-from fedotmas._outcome import Outcome
 
 if TYPE_CHECKING:
     from fedotmas.blackboard import Board
@@ -31,6 +31,16 @@ if TYPE_CHECKING:
 A = TypeVar("A")
 B = TypeVar("B")
 C = TypeVar("C")
+
+
+def _until_spec(until: Callable[..., bool] | Condition | str) -> dict[str, Any]:
+    """The declarative shape of a loop's until, kept for the Card after _as_predicate has
+    compiled it to a closure. A raw callable stays an opaque hole."""
+    if isinstance(until, str):
+        return {"until": "state", "key": until}
+    if isinstance(until, Condition):
+        return {"until": "condition"}
+    return {"until": "callable"}
 
 
 class Flow(Generic[A, B]):
@@ -146,7 +156,7 @@ class Flow(Generic[A, B]):
             revise.loop(until="approved")  # stop when state["approved"] is truthy
             revise.loop(until=lambda s: s["score"] >= 0.9)
         """
-        return _Loop(self, _as_predicate(until), budget)
+        return _Loop(self, _as_predicate(until), _until_spec(until), budget)
 
 
 class _Seq(Flow[Any, Any]):
@@ -186,10 +196,12 @@ class _Loop(Flow[Any, Any]):
         self,
         body: Flow[Any, Any],
         until: Callable[[Any, View], bool],
+        until_spec: dict[str, Any],
         budget: int | None,
     ) -> None:
         self._body = body
         self._until = until
+        self._until_spec = until_spec
         self._budget = budget
 
     def _build(self, ctx: Ctx, entry: str) -> tuple[list[Node], str]:
@@ -202,9 +214,17 @@ class _Loop(Flow[Any, Any]):
             round_term = any_of(round_term, Budget(self._budget))
         nodes = [
             _loop_iterate_node(
-                name, body, body_in, body_out, entry, state, self._until, round_term
+                name,
+                body,
+                body_in,
+                body_out,
+                entry,
+                state,
+                self._until,
+                round_term,
+                self._until_spec,
             ),
-            _loop_finish_node(name, state, name, self._until),
+            _loop_finish_node(name, state, name, self._until, self._until_spec),
         ]
         return nodes, name
 
@@ -214,9 +234,11 @@ class _Branch(Flow[Any, Any]):
         self,
         select: Flow[Any, Any] | Callable[[Any, View], str],
         cases: dict[str, Flow[Any, Any]],
+        select_spec: dict[str, Any],
     ) -> None:
         self._select = select
         self._cases = cases
+        self._select_spec = select_spec
 
     def _build(self, ctx: Ctx, entry: str) -> tuple[list[Node], str]:
         name = ctx.fresh("branch")
@@ -246,11 +268,24 @@ class _Branch(Flow[Any, Any]):
                 )
             return Result(writes=[Fact(tag=ins[key], value=value)])
 
-        nodes.append(as_node(route, name=f"{name}:route", reads=route_reads))
+        nodes.append(
+            as_node(
+                route,
+                name=f"{name}:route",
+                reads=route_reads,
+                kind=Kind.BRANCH_ROUTE,
+                writes=list(ins.values()),
+                params={"select": self._select_spec, "cases": list(self._cases)},
+            )
+        )
         for k, case in self._cases.items():
             case_nodes, case_out = case._build(ctx, ins[k])
             nodes.extend(case_nodes)
-            nodes.append(_alias_node(case_out, out, name=f"{name}:join:{k}"))
+            nodes.append(
+                _alias_node(
+                    case_out, out, name=f"{name}:join:{k}", kind=Kind.BRANCH_JOIN
+                )
+            )
         return nodes, out
 
 
@@ -270,10 +305,11 @@ def branch(
     """
     if isinstance(select, str):
         key = select
-        return _Branch(lambda state, view: _pick(state, key), cases)
+        spec: dict[str, Any] = {"by": "state", "key": key}
+        return _Branch(lambda state, view: _pick(state, key), cases, spec)
     if not isinstance(select, Flow):
-        return _Branch(bind_pred(select), cases)
-    return _Branch(select, cases)
+        return _Branch(bind_pred(select), cases, {"by": "callable"})
+    return _Branch(select, cases, {"by": "flow"})
 
 
 class _Gather(Flow[Any, Any]):
@@ -348,7 +384,16 @@ class _Nest(Flow[A, B]):
             _inner_guard(run, inner_out, f"nest {name!r}")
             return Result(writes=[Fact(tag=name, value=run.view.value(inner_out))])
 
-        return [as_node(invoke, name=name, reads=entry)], name
+        return [
+            as_node(
+                invoke,
+                name=name,
+                reads=entry,
+                kind=Kind.NEST,
+                params={"entry": inner_entry, "out": inner_out},
+                system=system,
+            )
+        ], name
 
 
 def nest(

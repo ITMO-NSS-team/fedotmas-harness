@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
-from fedotmas.engine.contract import Fact, Node, Result, Status, View
+from fedotmas.engine.contract import Fact, Kind, Node, Result, Status, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.node import as_node
 from fedotmas.engine.report import Run
@@ -32,14 +32,24 @@ def _collect_node(name: str, srcs: list[str], out: str) -> Node:
     async def invoke(input: Any, view: View) -> Result:
         return Result(writes=[Fact(tag=out, value=[view.value(s) for s in srcs])])
 
-    return as_node(invoke, name=name, reads=" ".join(srcs))
+    return as_node(
+        invoke,
+        name=name,
+        reads=" ".join(srcs),
+        kind=Kind.GATHER,
+        params={"srcs": srcs},
+    )
 
 
-def _alias_node(src: str, out: str, name: str | None = None) -> Node:
+def _alias_node(
+    src: str, out: str, name: str | None = None, kind: str = Kind.ALIAS
+) -> Node:
     async def invoke(input: Any, view: View) -> Result:
         return Result(writes=[Fact(tag=out, value=view.value(src))])
 
-    return as_node(invoke, name=name or f"alias:{out}", reads=src)
+    return as_node(
+        invoke, name=name or f"alias:{out}", reads=src, kind=kind, writes=[out]
+    )
 
 
 def _into_node(name: str, state_src: str, reply_src: str, key: str) -> Node:
@@ -56,7 +66,13 @@ def _into_node(name: str, state_src: str, reply_src: str, key: str) -> Node:
             writes=[Fact(tag=name, value={**state, key: view.value(reply_src)})]
         )
 
-    return as_node(invoke, name=name, reads=f"{state_src} {reply_src}")
+    return as_node(
+        invoke,
+        name=name,
+        reads=f"{state_src} {reply_src}",
+        kind=Kind.INTO,
+        params={"key": key, "state": state_src, "reply": reply_src},
+    )
 
 
 def _merge_node(name: str, state_src: str, reply_src: str) -> Node:
@@ -74,7 +90,13 @@ def _merge_node(name: str, state_src: str, reply_src: str) -> Node:
             )
         return Result(writes=[Fact(tag=name, value={**state, **patch})])
 
-    return as_node(invoke, name=name, reads=f"{state_src} {reply_src}")
+    return as_node(
+        invoke,
+        name=name,
+        reads=f"{state_src} {reply_src}",
+        kind=Kind.MERGE,
+        params={"state": state_src, "reply": reply_src},
+    )
 
 
 def _inner_guard(run: Run, out: str, what: str) -> None:
@@ -100,6 +122,7 @@ def _loop_iterate_node(
     state: str,
     until: Callable[[Any, View], bool],
     round_term: Terminate,
+    until_spec: dict[str, Any],
 ) -> Node:
     """One round per firing: feed the latest state (the entry fact on round one) into the
     body in a fresh inner store, write its output as the next state version. Re-arms while
@@ -124,11 +147,24 @@ def _loop_iterate_node(
             return view.exists(entry) if entry else True
         return not until(seen[-1].value, view)
 
-    return as_node(invoke, name=f"{name}:iter", reads=f"{state}:*", trigger=trigger)
+    return as_node(
+        invoke,
+        name=f"{name}:iter",
+        reads=f"{state}:*",
+        trigger=trigger,
+        kind=Kind.LOOP_ITER,
+        writes=[f"{state}:*"],
+        params={"until": dict(until_spec)},
+        system=body,
+    )
 
 
 def _loop_finish_node(
-    name: str, state: str, out: str, until: Callable[[Any, View], bool]
+    name: str,
+    state: str,
+    out: str,
+    until: Callable[[Any, View], bool],
+    until_spec: dict[str, Any],
 ) -> Node:
     """Copy the final state version to the loop's output once `until` clears; fires once,
     guarded by the output not existing yet."""
@@ -140,4 +176,12 @@ def _loop_finish_node(
         seen = view.query(f"{state}:*")
         return bool(seen) and until(seen[-1].value, view) and not view.exists(out)
 
-    return as_node(invoke, name=f"{name}:done", reads=f"{state}:*", trigger=trigger)
+    return as_node(
+        invoke,
+        name=f"{name}:done",
+        reads=f"{state}:*",
+        trigger=trigger,
+        kind=Kind.LOOP_DONE,
+        writes=[out],
+        params={"until": dict(until_spec)},
+    )

@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from typing import Any, cast
 
 from fedotmas._inject import bind_async
-from fedotmas.engine.contract import Fact, Node, Result, View
+from fedotmas.engine.contract import Fact, Kind, Node, Result, View
 from fedotmas.engine.node import as_node
 
 # A rule's code body of either arity: `async (input)` or `async (input, view)`. The union keeps
@@ -114,10 +114,20 @@ class Rule:
             return Result(writes=[Fact(tag=self.writes, value=value)])
 
         trigger, need = self._as_when()
+        when = self.when
+        if when is None:
+            when_desc: Any = "produce-once"
+        elif callable(when):
+            when_desc = "callable"
+        else:
+            when_desc = list(when)
         return as_node(
             invoke,
             name=self.name,
             reads=self._identity(need),
             trigger=trigger,
             meta=self.meta,
+            kind=Kind.RULE,
+            writes=[self.writes],
+            params={"when": when_desc, "input": self.reads},
         )
