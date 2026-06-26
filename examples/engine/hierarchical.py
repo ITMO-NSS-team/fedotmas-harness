@@ -1,9 +1,3 @@
-"""Hierarchical Teams (P12): a whole sub-system satisfies the Agent contract.
-
-A research team (its own System with its own Store) is wrapped as a single agent and
-dropped into an outer System. Nesting is free because a subgraph is just an agent.
-"""
-
 import asyncio
 
 from fedotmas.engine import as_node

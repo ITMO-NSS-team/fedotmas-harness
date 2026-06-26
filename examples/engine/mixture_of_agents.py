@@ -1,5 +1,3 @@
-"""Mixture-of-Agents (P7): layered parallel with aggregation between layers."""
-
 import asyncio
 from collections.abc import Awaitable, Callable
 

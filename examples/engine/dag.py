@@ -1,5 +1,3 @@
-"""DAG (P5): diamond dependency. a -> {b, c} -> d, where d waits on both b and c."""
-
 import asyncio
 
 from fedotmas.engine import as_node

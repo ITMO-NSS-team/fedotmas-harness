@@ -1,5 +1,3 @@
-"""Contract-Net (P14): bidders contend for a task, an auction Policy awards the winner."""
-
 import asyncio
 from collections.abc import Awaitable, Callable
 

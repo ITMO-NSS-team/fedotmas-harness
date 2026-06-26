@@ -1,8 +1,3 @@
-"""Reflection (P15): one agent revises its own output until it clears a bar.
-
-Same loop as Evaluator-Optimizer, with the critic folded into the generator.
-"""
-
 import asyncio
 
 from fedotmas.engine import as_node

@@ -47,7 +47,7 @@ class Echo:
 run = await flow.run("topic", bind={"llm": Echo()})
 ```
 
-`PydanticAI` is the batteries-included adapter, with structured output and token accounting. See [examples/sdk-llm/backends.py](../../examples/sdk-llm/backends.py) for binding others.
+`PydanticAI` is the batteries-included adapter, with structured output and token accounting. See [examples/llm/backends.py](../../examples/llm/backends.py) for binding others.
 
 ## Classify and route
 

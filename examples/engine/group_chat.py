@@ -1,5 +1,3 @@
-"""Group Chat (P11): a manager picks the next speaker, speakers append to a transcript."""
-
 import asyncio
 from collections.abc import Awaitable, Callable
 

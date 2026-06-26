@@ -40,9 +40,13 @@ class Budget(_Term):
 
 
 class Goal(_Term):
-    """Stop once a predicate over the store holds, e.g. the output fact exists."""
+    """Stop once a predicate over the store holds; a tag string is shorthand for that fact
+    existing, so Goal("out") means v.exists("out")."""
 
-    def __init__(self, predicate: Callable[[View], bool]) -> None:
+    def __init__(self, predicate: Callable[[View], bool] | str) -> None:
+        if isinstance(predicate, str):
+            tag = predicate
+            predicate = lambda v: v.exists(tag)  # noqa: E731
         self.predicate = predicate
 
     def done(self, view: View, report: StepReport) -> bool:

@@ -1,5 +1,3 @@
-"""Prompt Chaining (P1): seq as fact dependencies. researcher -> writer -> editor."""
-
 import asyncio
 
 from fedotmas.engine import as_node

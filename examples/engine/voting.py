@@ -1,9 +1,3 @@
-"""Voting (P3 Self-Consistency, P4 Ensemble): replicate -> join(vote).
-
-Self-Consistency = one model sampled N times; Ensemble = N distinct models.
-On the engine they are identical: parallel fan-out into a majority aggregator.
-"""
-
 import asyncio
 from collections import Counter
 from collections.abc import Awaitable, Callable

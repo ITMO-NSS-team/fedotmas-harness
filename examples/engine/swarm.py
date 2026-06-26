@@ -1,5 +1,3 @@
-"""Handoff / Swarm (P10): the active agent writes who is active next, loop until done."""
-
 import asyncio
 from collections.abc import Awaitable, Callable
 

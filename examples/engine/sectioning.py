@@ -1,5 +1,3 @@
-"""Sectioning (P2): fork-join. splitter -> {a, b, c} -> join(concat)."""
-
 import asyncio
 from collections.abc import Awaitable, Callable
 

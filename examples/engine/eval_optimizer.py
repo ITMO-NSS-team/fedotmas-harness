@@ -1,5 +1,3 @@
-"""Evaluator-Optimizer on the ReactiveExecutor with deterministic stub agents."""
-
 import asyncio
 
 from fedotmas.engine import as_node

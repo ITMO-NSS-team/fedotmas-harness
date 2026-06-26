@@ -1,5 +1,3 @@
-"""Select a pattern for the task, fill its roles, run the built system."""
-
 import asyncio
 
 from dotenv import load_dotenv

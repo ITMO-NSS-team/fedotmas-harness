@@ -1,5 +1,3 @@
-"""Blackboard (P13): no edges, agents self-activate on author-written conditions."""
-
 import asyncio
 
 from fedotmas.engine import as_node

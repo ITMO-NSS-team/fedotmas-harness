@@ -1,5 +1,3 @@
-"""Router (P8): classifier writes a label, exactly one target activates."""
-
 import asyncio
 from collections.abc import Awaitable, Callable
 

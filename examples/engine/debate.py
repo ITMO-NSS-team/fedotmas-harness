@@ -1,5 +1,3 @@
-"""Debate (P16): loop of parallel pro/con rounds judged each round, transcript accrues."""
-
 import asyncio
 
 from fedotmas.engine import as_node
