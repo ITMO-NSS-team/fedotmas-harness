@@ -1,11 +1,15 @@
 import asyncio
 
-from fedotmas.engine import as_node
-from fedotmas.engine.contract import Fact, Result, View
-from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.store import Store
-from fedotmas.engine.system import System
-from fedotmas.engine.terminate import Goal
+from fedotmas.engine import (
+    Fact,
+    Goal,
+    ReactiveExecutor,
+    Result,
+    Store,
+    System,
+    View,
+    as_node,
+)
 
 SUBTASKS = ["x", "y", "z"]
 

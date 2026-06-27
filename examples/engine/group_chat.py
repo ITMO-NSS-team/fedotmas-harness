@@ -1,12 +1,17 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from fedotmas.engine import as_node
-from fedotmas.engine.contract import Fact, Result, View
-from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.store import Store
-from fedotmas.engine.system import System
-from fedotmas.engine.terminate import Budget, Goal
+from fedotmas.engine import (
+    Budget,
+    Fact,
+    Goal,
+    ReactiveExecutor,
+    Result,
+    Store,
+    System,
+    View,
+    as_node,
+)
 
 SPEAKERS = ["alice", "bob", "carol"]
 
