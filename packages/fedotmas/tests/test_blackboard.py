@@ -1,7 +1,7 @@
 """The blackboard surface: produce-once, when triggers, re-fire identity, validation."""
 
 import pytest
-from fedotmas import Rule, blackboard
+from fedotmas import Condition, Rule, blackboard
 from fedotmas.engine import Fact, Goal, ReactiveExecutor, Store
 
 
@@ -68,6 +68,25 @@ async def test_positive_when_tags_join_the_refire_identity():
             store.commit([Fact(tag="sig", value=2, producer="feeder", step=50)])
             fed = True
     assert seen == [1, 2]
+
+
+async def test_when_condition_compares_a_view_value():
+    board = blackboard(
+        Rule("r", fn=mark, writes="x", when=Condition(key="score", op="gte", value=3))
+    )
+    low = await board.run({"score": 1}, goal="x", budget=3)
+    assert low.reason == "stalled"
+    high = await board.run({"score": 5}, goal="x")
+    assert high.ok
+
+
+async def test_when_composed_condition_spans_two_facts():
+    when = Condition(key="ready") & ~Condition(key="halt", op="exists")
+    board = blackboard(Rule("r", fn=mark, writes="x", when=when))
+    blocked = await board.run({"ready": True, "halt": 1}, goal="x", budget=3)
+    assert blocked.reason == "stalled"
+    clear = await board.run({"ready": True}, goal="x")
+    assert clear.ok
 
 
 async def test_callable_when_without_reads_fires_at_most_once():

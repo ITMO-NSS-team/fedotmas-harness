@@ -4,8 +4,8 @@ fixed point) and runs to the same output, given the opaque bodies by name. RED u
 from_blueprint is implemented; this file is the contract."""
 
 import pytest
-from _helpers import bump, double, gate, pick_a, pick_b, score, triple
-from fedotmas import Rule, action, blackboard, branch, gather
+from _helpers import bump, count, double, gate, pick_a, pick_b, score, triple, upper
+from fedotmas import Rule, action, blackboard, branch, gather, nest
 from fedotmas.engine.contract import Fact
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.store import Store
@@ -74,7 +74,25 @@ async def test_roundtrip_board():
     )
 
 
+async def test_roundtrip_nest_over_board():
+    inner = blackboard(Rule("count", count, reads="topic", writes="report"))
+    flow = action(upper) + nest(inner, entry="topic", out="report")
+    system = flow.system(entry="in", out="out")
+    bp = to_blueprint(system)
+    rebuilt = from_blueprint(bp, Deps(bodies={"upper": upper, "count": count}))
+    assert to_blueprint(rebuilt) == bp
+    assert await _out(rebuilt, "in", "a b c", "out") == await _out(
+        system, "in", "a b c", "out"
+    )
+
+
 def test_missing_body_is_named_error():
     bp = to_blueprint(action(double).system(entry="in", out="out"))
     with pytest.raises(ReconstructError):
         from_blueprint(bp, Deps(bodies={}))
+
+
+def test_callable_until_is_named_error():
+    system = action(bump).loop(until=lambda s: s["done"]).system(entry="in", out="out")
+    with pytest.raises(ReconstructError):
+        from_blueprint(to_blueprint(system), Deps(bodies={"bump": bump}))

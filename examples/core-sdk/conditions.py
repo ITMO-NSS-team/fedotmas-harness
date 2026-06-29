@@ -23,7 +23,21 @@ async def main() -> None:
     )
     board = blackboard(produce_once, tag_presence)
     verdict = await board.run({"draft": "a b c d e f"}, goal="verdict")
-    print("when=:", verdict.value)
+    print("when tags:", verdict.value)
+
+    # the same Condition spans both domains: over the view in a board when=, over the state
+    # in a loop until=. `["score", "!verdict"]` is the compact form of the composition below.
+    when_condition = Condition(key="score", op="exists") & ~Condition(
+        key="verdict", op="exists"
+    )
+    composed = blackboard(
+        produce_once,
+        Rule("gate", decide, reads="score", writes="verdict", when=when_condition),
+    )
+    print(
+        "when condition:",
+        (await composed.run({"draft": "a b c"}, goal="verdict")).value,
+    )
 
     by_key = action(revise).loop(until="done")
     by_condition = action(revise).loop(until=Condition(key="score", op="gte", value=3))

@@ -3,25 +3,25 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
+from fedotmas._condition import Predicate, _pick, state_predicate
 from fedotmas._inject import bind_pred
 from fedotmas._outcome import Outcome
-from fedotmas.engine.contract import Fact, Kind, Node, Result, View
+from fedotmas.engine.contract import Fact, Kind, Node, View
 from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.node import as_node
 from fedotmas.engine.report import StepReport
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
 from fedotmas.engine.terminate import Budget, Goal, Terminate, any_of
-from fedotmas.flow._condition import Condition, _as_predicate, _pick
 from fedotmas.flow._nodes import (
     Ctx,
     _alias_node,
     _collect_node,
-    _inner_guard,
     _into_node,
     _loop_finish_node,
     _loop_iterate_node,
     _merge_node,
+    _nest_node,
+    _route_node,
 )
 
 if TYPE_CHECKING:
@@ -31,16 +31,6 @@ if TYPE_CHECKING:
 A = TypeVar("A")
 B = TypeVar("B")
 C = TypeVar("C")
-
-
-def _until_spec(until: Callable[..., bool] | Condition | str) -> dict[str, Any]:
-    """The declarative shape of a loop's until, kept for the Card after _as_predicate has
-    compiled it to a closure. A raw callable stays an opaque hole."""
-    if isinstance(until, str):
-        return {"until": "state", "key": until}
-    if isinstance(until, Condition):
-        return {"until": "condition"}
-    return {"until": "callable"}
 
 
 class Flow(Generic[A, B]):
@@ -141,22 +131,23 @@ class Flow(Generic[A, B]):
 
     def loop(
         self: Flow[A, A],
-        until: Callable[[A], bool] | Callable[[A, View], bool] | Condition | str,
+        until: Callable[[A], bool] | Callable[[A, View], bool] | Predicate | str,
         *,
         budget: int | None = 100,
     ) -> Flow[A, A]:
         """Iterate the flow, feeding each round's output in as the next round's input, until
         `until` clears. `until` is a callable over the state (optionally the state and the
-        view), a Condition, or a state key (stop when state[key] is truthy). Each round runs
-        the body in its own inner store as one outer superstep, so rounds are capped by the
-        outer budget but a round itself is not; `budget` caps the supersteps inside one round
-        (default 100, None lifts it).
+        view), a Condition or its `&`/`|`/`~` composition, or a state key (stop when state[key]
+        is truthy). Each round runs the body in its own inner store as one outer superstep, so
+        rounds are capped by the outer budget but a round itself is not; `budget` caps the
+        supersteps inside one round (default 100, None lifts it).
 
         Example:
             revise.loop(until="approved")  # stop when state["approved"] is truthy
             revise.loop(until=lambda s: s["score"] >= 0.9)
         """
-        return _Loop(self, _as_predicate(until), _until_spec(until), budget)
+        fn, pred = state_predicate(until)
+        return _Loop(self, fn, pred, budget)
 
 
 class _Seq(Flow[Any, Any]):
@@ -196,12 +187,12 @@ class _Loop(Flow[Any, Any]):
         self,
         body: Flow[Any, Any],
         until: Callable[[Any, View], bool],
-        until_spec: dict[str, Any],
+        pred: Predicate | None,
         budget: int | None,
     ) -> None:
         self._body = body
         self._until = until
-        self._until_spec = until_spec
+        self._pred = pred
         self._budget = budget
 
     def _build(self, ctx: Ctx, entry: str) -> tuple[list[Node], str]:
@@ -222,9 +213,9 @@ class _Loop(Flow[Any, Any]):
                 state,
                 self._until,
                 round_term,
-                self._until_spec,
+                self._pred,
             ),
-            _loop_finish_node(name, state, name, self._until, self._until_spec),
+            _loop_finish_node(name, state, name, self._until, self._pred),
         ]
         return nodes, name
 
@@ -257,25 +248,16 @@ class _Branch(Flow[Any, Any]):
             classify = select
             route_reads = entry
 
-        async def route(input: Any, view: View) -> Result:
-            value = view.value(entry) if entry else None
-            key = (
-                classify(value, view) if classify is not None else view.value(label_tag)
-            )
-            if key not in ins:
-                raise ValueError(
-                    f"branch {name!r} got label {key!r}, not one of {sorted(ins)}"
-                )
-            return Result(writes=[Fact(tag=ins[key], value=value)])
-
         nodes.append(
-            as_node(
-                route,
-                name=f"{name}:route",
-                reads=route_reads,
-                kind=Kind.BRANCH_ROUTE,
-                writes=list(ins.values()),
-                params={"select": self._select_spec, "cases": list(self._cases)},
+            _route_node(
+                name,
+                route_reads,
+                entry,
+                classify,
+                label_tag,
+                ins,
+                self._select_spec,
+                list(self._cases),
             )
         )
         for k, case in self._cases.items():
@@ -370,30 +352,7 @@ class _Nest(Flow[A, B]):
         until = self._until or Goal(lambda v: v.exists(inner_out))
         if self._budget is not None:
             until = any_of(until, Budget(self._budget))
-
-        async def invoke(input: Any, view: View) -> Result:
-            inner = Store()
-            run = await ReactiveExecutor().run(
-                system,
-                inner,
-                seed=[
-                    Fact(tag=inner_entry, value=view.value(entry) if entry else None)
-                ],
-                terminate=until,
-            )
-            _inner_guard(run, inner_out, f"nest {name!r}")
-            return Result(writes=[Fact(tag=name, value=run.view.value(inner_out))])
-
-        return [
-            as_node(
-                invoke,
-                name=name,
-                reads=entry,
-                kind=Kind.NEST,
-                params={"entry": inner_entry, "out": inner_out},
-                system=system,
-            )
-        ], name
+        return [_nest_node(name, system, entry, inner_entry, inner_out, until)], name
 
 
 def nest(

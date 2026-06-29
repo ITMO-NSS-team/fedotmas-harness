@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
+from fedotmas._condition import Predicate, spec_of
 from fedotmas.engine.contract import Fact, Kind, Node, Result, Status, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.node import as_node
@@ -99,6 +100,71 @@ def _merge_node(name: str, state_src: str, reply_src: str) -> Node:
     )
 
 
+def _route_node(
+    name: str,
+    route_reads: str,
+    entry: str,
+    classify: Callable[[Any, View], str] | None,
+    label_tag: str,
+    ins: dict[str, str],
+    select_spec: dict[str, Any],
+    cases: list[str],
+) -> Node:
+    """Route the input to one case's inlet by a label: a python classifier over the value, or
+    the label fact a select flow wrote. The case keys and their inlet tags are fixed at build,
+    so the route only chooses among them."""
+
+    async def route(input: Any, view: View) -> Result:
+        value = view.value(entry) if entry else None
+        key = classify(value, view) if classify is not None else view.value(label_tag)
+        if key not in ins:
+            raise ValueError(
+                f"branch {name!r} got label {key!r}, not one of {sorted(ins)}"
+            )
+        return Result(writes=[Fact(tag=ins[key], value=value)])
+
+    return as_node(
+        route,
+        name=f"{name}:route",
+        reads=route_reads,
+        kind=Kind.BRANCH_ROUTE,
+        writes=list(ins.values()),
+        params={"select": select_spec, "cases": cases},
+    )
+
+
+def _nest_node(
+    name: str,
+    system: System,
+    entry: str,
+    inner_entry: str,
+    inner_out: str,
+    until: Terminate,
+) -> Node:
+    """Run a whole sub-system as one node: seed its own inner store with the outer input, run
+    to `until`, write the inner output back as one fact. The interior stays opaque to the outer
+    engine; a failure surfaces as this node's error."""
+
+    async def invoke(input: Any, view: View) -> Result:
+        run = await ReactiveExecutor().run(
+            system,
+            Store(),
+            seed=[Fact(tag=inner_entry, value=view.value(entry) if entry else None)],
+            terminate=until,
+        )
+        _inner_guard(run, inner_out, f"nest {name!r}")
+        return Result(writes=[Fact(tag=name, value=run.view.value(inner_out))])
+
+    return as_node(
+        invoke,
+        name=name,
+        reads=entry,
+        kind=Kind.NEST,
+        params={"entry": inner_entry, "out": inner_out},
+        system=system,
+    )
+
+
 def _inner_guard(run: Run, out: str, what: str) -> None:
     """Surface an inner run's failure as this node's failure, so the outer engine records it
     as an error fact instead of silently writing None."""
@@ -122,7 +188,7 @@ def _loop_iterate_node(
     state: str,
     until: Callable[[Any, View], bool],
     round_term: Terminate,
-    until_spec: dict[str, Any],
+    pred: Predicate | None,
 ) -> Node:
     """One round per firing: feed the latest state (the entry fact on round one) into the
     body in a fresh inner store, write its output as the next state version. Re-arms while
@@ -154,7 +220,7 @@ def _loop_iterate_node(
         trigger=trigger,
         kind=Kind.LOOP_ITER,
         writes=[f"{state}:*"],
-        params={"until": dict(until_spec)},
+        params={"until": spec_of(pred), "entry": entry},
         system=body,
     )
 
@@ -164,7 +230,7 @@ def _loop_finish_node(
     state: str,
     out: str,
     until: Callable[[Any, View], bool],
-    until_spec: dict[str, Any],
+    pred: Predicate | None,
 ) -> Node:
     """Copy the final state version to the loop's output once `until` clears; fires once,
     guarded by the output not existing yet."""
@@ -183,5 +249,5 @@ def _loop_finish_node(
         trigger=trigger,
         kind=Kind.LOOP_DONE,
         writes=[out],
-        params={"until": dict(until_spec)},
+        params={"until": spec_of(pred)},
     )

@@ -59,7 +59,7 @@ def test_loop_until_spec_and_body_recurse():
     bp = to_blueprint(action(bump).loop(until="done").system(entry="in", out="out"))
     it = node(bp, "loop#1:iter")
     assert it.kind == "loop.iter"
-    assert it.params["until"] == {"until": "state", "key": "done"}
+    assert it.params["until"] == {"key": "done"}
     assert it.inner is not None
     assert any(n.kind == "action" for n in it.inner.nodes)
     assert node(bp, "loop#1:done").kind == "loop.done"
@@ -74,7 +74,12 @@ def test_board_uniform_with_flow():
     assert node(bp, "score").kind == "rule"
     assert node(bp, "score").writes == ["score"]
     assert node(bp, "gate").writes == ["verdict"]
-    assert node(bp, "gate").params["when"] == ["score", "!verdict"]
+    assert node(bp, "gate").params["when"] == {
+        "all": [
+            {"key": "score", "op": "exists"},
+            {"not": {"key": "verdict", "op": "exists"}},
+        ]
+    }
     assert has_edge(bp, "score", "gate")
 
 
