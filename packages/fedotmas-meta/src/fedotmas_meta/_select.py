@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from fedotmas_llm import LLM, agent
 
-from fedotmas_meta.presets import Preset, catalog
+from fedotmas_meta.presets import Preset
 
 _PROMPT = (
     "You design multi-agent systems. Pick the execution pattern that best fits"
@@ -18,11 +18,9 @@ class Selection:
     pattern: str
 
 
-async def select(
-    task: str, *, llm: LLM, presets: Sequence[Preset] | None = None
-) -> Selection:
-    """Match a task to a pattern family: one constrained choice over the catalog menu."""
-    pool = tuple(presets) if presets is not None else catalog()
+async def select(task: str, *, presets: Sequence[Preset], llm: LLM) -> Selection:
+    """Match a task to a pattern family: one constrained choice over the caller's menu."""
+    pool = tuple(presets)
     menu = "\n".join(f"- {p.name}: {p.hint}" for p in pool)
     pick = agent(
         "select", prompt=_PROMPT.format(menu=menu), labels=[p.name for p in pool]

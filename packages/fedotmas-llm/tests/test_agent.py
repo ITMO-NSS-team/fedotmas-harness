@@ -14,7 +14,7 @@ class FakeLLM:
         self._reply = reply
 
     async def complete(
-        self, prompt: str, input: Any, view: View, returns: Any = str
+        self, prompt: str, input: Any, view: View, returns: Any = str, tools: Any = None
     ) -> Any:
         return self._reply(prompt, input)
 

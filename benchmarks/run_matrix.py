@@ -1,14 +1,15 @@
 """Run the pattern x benchmark matrix; one JSON record file per configuration.
 
-Temporarily unavailable: the flow patterns (single/chain/debate/eval_optimizer/orchestrator/
-router) were removed during the dsl refactor, so only the blackboard pattern resolves. Check
-out commit 2bd05ed to run the full matrix.
+Each pattern is built through fedotmas_meta.assemble over the catalog in presets.py; today
+only blackboard resolves end-to-end. The full matrix also needs the single/chain/
+eval_optimizer/orchestrator/router presets ported into presets.py and the domains' debate
+fills realigned to the voters/judge preset (still the old pro/con/judge roles).
 
 A benchmark is a folder exposing suite(n, seed) and FILLS (see gsm8k/). The model is
 a full pydantic-ai spec: openai-responses:gpt-4o-mini, openrouter:qwen/qwen3-30b, ...
 Usage:
 uv run --group examples --group bench python benchmarks/run_matrix.py \
-    --bench gsm8k --n 5 --patterns single,chain
+    --bench gsm8k --n 5 --patterns blackboard
 """
 
 from __future__ import annotations
@@ -26,8 +27,9 @@ os.environ.setdefault("DEEPEVAL_TELEMETRY_OPT_OUT", "YES")
 
 from dotenv import load_dotenv  # noqa: E402
 from fedotmas_llm.adapters.pydantic_ai import PydanticAI  # noqa: E402
-from fedotmas_meta.presets import get  # noqa: E402
+from fedotmas_meta import assemble  # noqa: E402
 from model import FlowModel  # noqa: E402
+from presets import CATALOG, spec  # noqa: E402
 
 OUT = Path(__file__).parent / "out"
 
@@ -37,7 +39,7 @@ def slug(model: str) -> str:
 
 
 def run_one(pattern: str, domain: ModuleType, args: argparse.Namespace) -> str:
-    flow = get(pattern).build(domain.FILLS[pattern])
+    flow = assemble(spec(pattern, domain.FILLS), presets=CATALOG)
     backend = PydanticAI(args.model)
     config = FlowModel(f"{pattern}/{args.model}", flow, backend)
     suite = domain.suite(args.n, args.seed)

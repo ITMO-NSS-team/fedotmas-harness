@@ -4,16 +4,38 @@ from typing import Any, Protocol, runtime_checkable
 
 from fedotmas import Flow
 
-from fedotmas_meta.presets._board import BLACKBOARD
-from fedotmas_meta.presets._spec import Fill, RoleSpec
+from fedotmas_meta.presets._spec import (
+    AgentSpec,
+    Bound,
+    Fill,
+    ResolvedFill,
+    RoleSpec,
+    SystemSpec,
+    check_fill,
+    group,
+    solo,
+)
 
-__all__ = ["Fill", "Preset", "RoleSpec", "catalog", "get"]
+__all__ = [
+    "AgentSpec",
+    "Bound",
+    "Fill",
+    "Preset",
+    "ResolvedFill",
+    "RoleSpec",
+    "SystemSpec",
+    "check_fill",
+    "group",
+    "solo",
+]
 
 
 @runtime_checkable
 class Preset(Protocol):
     """A pattern family with named role slots. `hint` is the one-liner the selector ranks on,
-    `roles` says which prompts to fill, `build` turns a filling into a runnable Flow."""
+    `roles` says which slots to fill, `reserved` the wiring names a many role must avoid, and
+    `build` turns a resolved filling into a runnable Flow. The catalog is the caller's: the
+    package ships this protocol and the assembly mechanism, not a fixed menu of systems."""
 
     @property
     def name(self) -> str: ...
@@ -21,21 +43,6 @@ class Preset(Protocol):
     def hint(self) -> str: ...
     @property
     def roles(self) -> tuple[RoleSpec, ...]: ...
-    def build(self, roles: Fill) -> Flow[Any, Any]: ...
-
-
-# The flow presets (single/chain/debate/eval_optimizer/orchestrator/router) are dsl-based and
-# out during the dsl refactor (full set at commit 2bd05ed); only blackboard builds without dsl.
-_CATALOG: tuple[Preset, ...] = (BLACKBOARD,)
-
-
-def catalog() -> tuple[Preset, ...]:
-    """The closed menu of families, in selector display order."""
-    return _CATALOG
-
-
-def get(name: str) -> Preset:
-    for p in _CATALOG:
-        if p.name == name:
-            return p
-    raise KeyError(f"unknown preset {name!r}; one of {[p.name for p in _CATALOG]}")
+    @property
+    def reserved(self) -> frozenset[str]: ...
+    def build(self, fill: ResolvedFill) -> Flow[Any, Any]: ...

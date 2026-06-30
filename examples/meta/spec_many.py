@@ -1,3 +1,4 @@
+from _presets import CATALOG
 from fedotmas.serialize import to_blueprint
 from fedotmas_meta import AgentSpec, SystemSpec, assemble
 
@@ -6,8 +7,8 @@ class EchoLLM:
     def __init__(self, tag: str) -> None:
         self.tag = tag
 
-    async def complete(self, prompt, content, view, *, returns=None):
-        return f"{self.tag}:{content}"
+    async def complete(self, prompt, input, view, returns=None, tools=None):
+        return f"{self.tag}:{input}"
 
 
 VOTERS = {
@@ -30,7 +31,7 @@ def main() -> None:
     print("spec is just strings:", SystemSpec.model_validate_json(wire) == PROPOSAL)
 
     models = {"fast": EchoLLM("fast"), "strong": EchoLLM("strong")}
-    flow = assemble(PROPOSAL, models=models)
+    flow = assemble(PROPOSAL, presets=CATALOG, models=models)
     system = flow.system(entry="question", out="answer")
 
     bp = to_blueprint(system)

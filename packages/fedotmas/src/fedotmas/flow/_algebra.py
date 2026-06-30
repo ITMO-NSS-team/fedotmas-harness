@@ -214,6 +214,7 @@ class _Loop(Flow[Any, Any]):
                 self._until,
                 round_term,
                 self._pred,
+                self._budget,
             ),
             _loop_finish_node(name, state, name, self._until, self._pred),
         ]
@@ -352,7 +353,10 @@ class _Nest(Flow[A, B]):
         until = self._until or Goal(lambda v: v.exists(inner_out))
         if self._budget is not None:
             until = any_of(until, Budget(self._budget))
-        return [_nest_node(name, system, entry, inner_entry, inner_out, until)], name
+        nest = _nest_node(
+            name, system, entry, inner_entry, inner_out, until, self._budget
+        )
+        return [nest], name
 
 
 def nest(

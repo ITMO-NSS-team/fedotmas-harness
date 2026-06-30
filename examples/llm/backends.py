@@ -19,7 +19,7 @@ class LangChain:
         self._model = init_chat_model(model)
 
     async def complete(
-        self, prompt: str, input: Any, view: View, returns: Any = str
+        self, prompt: str, input: Any, view: View, returns: Any = str, tools: Any = None
     ) -> Any:
         messages = [SystemMessage(prompt), HumanMessage(str(input))]
         reply = await self._model.ainvoke(messages)

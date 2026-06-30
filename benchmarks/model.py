@@ -43,10 +43,12 @@ class CountingLLM:
         self.calls = 0
 
     async def complete(
-        self, prompt: str, input: Any, view: Any, returns: Any = str
+        self, prompt: str, input: Any, view: Any, returns: Any = str, tools: Any = None
     ) -> Any:
         self.calls += 1
-        return await self.inner.complete(prompt, input, view, returns=returns)
+        return await self.inner.complete(
+            prompt, input, view, returns=returns, tools=tools
+        )
 
 
 class FlowModel(DeepEvalBaseLLM):

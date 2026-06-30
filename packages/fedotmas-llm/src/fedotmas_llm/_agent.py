@@ -6,6 +6,7 @@ from fedotmas.engine.contract import Node, View
 from fedotmas.ext import Ctx, Flow, node_from_fn, render
 
 from fedotmas_llm._llm import LLM
+from fedotmas_llm._tools import Tool
 
 A = TypeVar("A")
 B = TypeVar("B")
@@ -25,6 +26,7 @@ class _LLMAtom(Flow[Any, Any]):
         returns: Any,
         llm: LLM | None,
         labels: list[str] | None = None,
+        tools: list[Tool] | None = None,
     ) -> None:
         self._name = name
         self._prompt = prompt
@@ -32,6 +34,7 @@ class _LLMAtom(Flow[Any, Any]):
         self._returns = returns
         self._llm = llm
         self._labels = labels
+        self._tools = tools
 
     def _build(self, ctx: Ctx, entry: str) -> tuple[list[Node], str]:
         llm = self._llm or ctx.bindings.get("llm")
@@ -41,11 +44,12 @@ class _LLMAtom(Flow[Any, Any]):
                 'run-scoped default bind={"llm": ...} at .run()/.system()'
             )
         name, prompt, template = self._name, self._prompt, self._input
-        returns, labels = self._returns, self._labels
+        returns, labels, tools = self._returns, self._labels, self._tools
+        extra = {"tools": tools} if tools else {}
 
         async def invoke(value: Any, view: View) -> Any:
             content = render(template, value, view, name) if template else value
-            reply = await llm.complete(prompt, content, view, returns=returns)
+            reply = await llm.complete(prompt, content, view, returns=returns, **extra)
             if labels is not None and reply not in labels:
                 raise ValueError(f"agent {name!r} returned {reply!r}, not in {labels}")
             return reply
@@ -56,7 +60,12 @@ class _LLMAtom(Flow[Any, Any]):
 
 @overload
 def agent(
-    name: str, *, prompt: str, input: str | None = ..., llm: LLM | None = ...
+    name: str,
+    *,
+    prompt: str,
+    input: str | None = ...,
+    llm: LLM | None = ...,
+    tools: list[Tool] | None = ...,
 ) -> Flow[str, str]: ...
 @overload
 def agent(
@@ -67,6 +76,7 @@ def agent(
     returns: type[B],
     input: str | None = ...,
     llm: LLM | None = ...,
+    tools: list[Tool] | None = ...,
 ) -> Flow[A, B]: ...
 @overload
 def agent(
@@ -77,6 +87,7 @@ def agent(
     input: str | None = ...,
     takes: type[A] = ...,
     llm: LLM | None = ...,
+    tools: list[Tool] | None = ...,
 ) -> Flow[A, str]: ...
 def agent(
     name: str,
@@ -87,6 +98,7 @@ def agent(
     returns: type = str,
     labels: list[str] | None = None,
     llm: LLM | None = None,
+    tools: list[Tool] | None = None,
 ) -> Flow[Any, Any]:
     """Lift a prompt into an LLM agent: a Flow atom whose body is data, not code. Always a
     model call; the deterministic counterpart is fedotmas.action.
@@ -99,8 +111,10 @@ def agent(
     constrained at the backend via a Literal and validated regardless, the shape that drives
     branch when the route is the model's choice. To thread a dict state, compose the result:
     `agent(..., takes=dict, returns=...).into("key")` puts the reply under one key, `.merge()`
-    folds a structured reply's fields in. The backend binds via `llm` here or the run-scoped
-    `bind={"llm": ...}`; neither bound fails at compile time.
+    folds a structured reply's fields in. `tools` are the tools the model may call, a mix of
+    FunctionTool (a local callable) and MCPTool (a server url); they reach the backend only
+    when present, so declaring tools requires a backend that accepts them. The backend binds
+    via `llm` here or the run-scoped `bind={"llm": ...}`; neither bound fails at compile time.
 
     Example:
         draft = agent("draft", prompt="Write a haiku about {topic}.")
@@ -115,6 +129,14 @@ def agent(
         # built via __getitem__ because the labels are runtime data, not a static type form
         lit = Literal.__getitem__(tuple(labels))
         return _LLMAtom(
-            name, prompt=prompt, input=input, returns=lit, llm=llm, labels=labels
+            name,
+            prompt=prompt,
+            input=input,
+            returns=lit,
+            llm=llm,
+            labels=labels,
+            tools=tools,
         )
-    return _LLMAtom(name, prompt=prompt, input=input, returns=returns, llm=llm)
+    return _LLMAtom(
+        name, prompt=prompt, input=input, returns=returns, llm=llm, tools=tools
+    )

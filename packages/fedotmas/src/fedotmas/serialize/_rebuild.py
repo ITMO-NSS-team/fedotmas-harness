@@ -89,9 +89,17 @@ def _body(name: str, deps: Deps) -> Callable[[Any, View], Any]:
 
 def _nest(n: BlueprintNode, deps: Deps) -> Node:
     inner_out = n.params["out"]
-    until: Terminate = any_of(Goal(lambda v: v.exists(inner_out)), Budget(100))
+    budget = n.params.get("budget", 100)
+    goal: Terminate = Goal(lambda v: v.exists(inner_out))
+    until = any_of(goal, Budget(budget)) if budget is not None else goal
     return _nest_node(
-        n.name, _inner(n, deps), _first(n.reads), n.params["entry"], inner_out, until
+        n.name,
+        _inner(n, deps),
+        _first(n.reads),
+        n.params["entry"],
+        inner_out,
+        until,
+        budget,
     )
 
 
@@ -128,7 +136,9 @@ def _loop_iter(n: BlueprintNode, deps: Deps) -> Node:
     name = n.name.removesuffix(":iter")
     fn, pred = _until(name, n.params["until"])
     body_out = f"{name}:out"
-    round_term: Terminate = any_of(Goal(lambda v: v.exists(body_out)), Budget(100))
+    budget = n.params.get("budget", 100)
+    goal: Terminate = Goal(lambda v: v.exists(body_out))
+    round_term = any_of(goal, Budget(budget)) if budget is not None else goal
     return _loop_iterate_node(
         name,
         _inner(n, deps),
@@ -139,6 +149,7 @@ def _loop_iter(n: BlueprintNode, deps: Deps) -> Node:
         fn,
         round_term,
         pred,
+        budget,
     )
 
 

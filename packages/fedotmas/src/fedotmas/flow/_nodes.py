@@ -140,10 +140,12 @@ def _nest_node(
     inner_entry: str,
     inner_out: str,
     until: Terminate,
+    budget: int | None,
 ) -> Node:
     """Run a whole sub-system as one node: seed its own inner store with the outer input, run
     to `until`, write the inner output back as one fact. The interior stays opaque to the outer
-    engine; a failure surfaces as this node's error."""
+    engine; a failure surfaces as this node's error. `budget` is the inner superstep cap folded
+    into `until`, stamped on the Card so the round-trip restores the same bound."""
 
     async def invoke(input: Any, view: View) -> Result:
         run = await ReactiveExecutor().run(
@@ -160,7 +162,7 @@ def _nest_node(
         name=name,
         reads=entry,
         kind=Kind.NEST,
-        params={"entry": inner_entry, "out": inner_out},
+        params={"entry": inner_entry, "out": inner_out, "budget": budget},
         system=system,
     )
 
@@ -189,10 +191,12 @@ def _loop_iterate_node(
     until: Callable[[Any, View], bool],
     round_term: Terminate,
     pred: Predicate | None,
+    budget: int | None,
 ) -> Node:
     """One round per firing: feed the latest state (the entry fact on round one) into the
     body in a fresh inner store, write its output as the next state version. Re-arms while
-    `until` has not yet cleared on the latest state."""
+    `until` has not yet cleared on the latest state. `budget` is the per-round superstep cap
+    folded into `round_term`, stamped on the Card so the round-trip restores the same bound."""
 
     async def invoke(input: Any, view: View) -> Result:
         seen = view.query(f"{state}:*")
@@ -220,7 +224,7 @@ def _loop_iterate_node(
         trigger=trigger,
         kind=Kind.LOOP_ITER,
         writes=[f"{state}:*"],
-        params={"until": spec_of(pred), "entry": entry},
+        params={"until": spec_of(pred), "entry": entry, "budget": budget},
         system=body,
     )
 

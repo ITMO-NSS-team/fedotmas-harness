@@ -8,6 +8,7 @@ from fedotmas.engine.contract import View
 from fedotmas.ext import Rule, render
 
 from fedotmas_llm._llm import LLM
+from fedotmas_llm._tools import Tool
 
 _BoundFn = Callable[[Any, View], Awaitable[Any]]
 
@@ -31,6 +32,7 @@ class PromptRule(Rule):
     input: str | None = None
     returns: Any = str
     llm: LLM | None = None
+    tools: list[Tool] | None = None
 
     def _validate(self) -> None:
         if self.prompt is None:
@@ -53,9 +55,10 @@ class PromptRule(Rule):
             self.returns,
         )
         assert prompt is not None
+        extra = {"tools": self.tools} if self.tools else {}
 
         async def step(value: Any, view: View) -> Any:
             content = render(template, value, view, name) if template else value
-            return await llm.complete(prompt, content, view, returns=returns)
+            return await llm.complete(prompt, content, view, returns=returns, **extra)
 
         return step
