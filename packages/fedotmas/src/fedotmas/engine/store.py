@@ -6,7 +6,7 @@ from typing import Any
 from fedotmas.engine.contract import Fact, View
 
 
-def _match(tag: str, pattern: str) -> bool:
+def matches(tag: str, pattern: str) -> bool:
     if pattern.endswith("*"):
         return tag.startswith(pattern[:-1])
     return tag == pattern
@@ -20,7 +20,7 @@ class Snapshot:
         self._facts = facts
 
     def query(self, pattern: str) -> list[Fact]:
-        return [f for f in self._facts if _match(f.tag, pattern)]
+        return [f for f in self._facts if matches(f.tag, pattern)]
 
     def get(self, tag: str) -> Fact | None:
         found = self.query(tag)
@@ -31,7 +31,7 @@ class Snapshot:
         return f.value if f else None
 
     def exists(self, pattern: str) -> bool:
-        return any(_match(f.tag, pattern) for f in self._facts)
+        return any(matches(f.tag, pattern) for f in self._facts)
 
     def count(self, pattern: str) -> int:
         return len(self.query(pattern))

@@ -4,7 +4,13 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from fedotmas._condition import Predicate, spec_of, view_predicate
+from fedotmas._condition import (
+    CALLABLE,
+    PRODUCE_ONCE,
+    Predicate,
+    spec_of,
+    view_predicate,
+)
 from fedotmas._inject import bind_async
 from fedotmas.engine.contract import Fact, Kind, Node, Result, View
 from fedotmas.engine.node import as_node
@@ -91,10 +97,10 @@ class Rule:
         tag list or a Condition compile through one view predicate and serialize in full."""
         when = self.when
         if when is None:
-            return _produce_once(self.reads, self.writes), [], "produce-once"
+            return _produce_once(self.reads, self.writes), [], PRODUCE_ONCE
         trigger, pred = view_predicate(when)
         if pred is None:
-            return trigger, [], "callable"
+            return trigger, [], CALLABLE
         return trigger, pred.positive_keys(), spec_of(pred)
 
     def _identity(self, need: list[str]) -> str:

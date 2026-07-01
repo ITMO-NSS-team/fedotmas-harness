@@ -201,13 +201,19 @@ def as_condition(spec: Predicate | str | Sequence[str]) -> Predicate:
     """Fold the declarative spellings into one Predicate: a Condition (or its `&`/`|`/`~`
     composition) passes through, a str is a truthy Condition over that key, a tag sequence is an
     all-of existence check. The compact list is a wire form too, not just an authoring sugar."""
-    if isinstance(spec, Predicate):
-        return spec
-    if isinstance(spec, str):
-        return Condition(key=spec)
-    if isinstance(spec, Sequence):
-        return _tags(spec)
-    raise TypeError(f"not a condition spec: {spec!r}")
+    match spec:
+        case Predicate():
+            return spec
+        case str():
+            return Condition(key=spec)
+        case Sequence():
+            return _tags(spec)
+        case _:
+            raise TypeError(f"not a condition spec: {spec!r}")
+
+
+CALLABLE = "callable"
+PRODUCE_ONCE = "produce-once"
 
 
 def spec_of(pred: Predicate | None) -> dict[str, Any] | str:
@@ -215,7 +221,7 @@ def spec_of(pred: Predicate | None) -> dict[str, Any] | str:
     declarative one (a dict, the from_blueprint signal that it round-trips), the string
     'callable' for an opaque escape the blueprint cannot carry."""
     if pred is None:
-        return "callable"
+        return CALLABLE
     return pred.model_dump(mode="json", by_alias=True, exclude_defaults=True)
 
 

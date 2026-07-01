@@ -17,11 +17,11 @@ from _helpers import (
 )
 from fedotmas import Rule, action, blackboard, branch, gather, nest
 from fedotmas.serialize import Blueprint, to_blueprint, to_graph
-from fedotmas.serialize._dataflow import _matches
+from fedotmas.engine.store import matches
 
 
 def _covers(declared, observed):
-    return all(any(_matches(o, d) for d in declared) for o in observed)
+    return all(any(matches(o, d) for d in declared) for o in observed)
 
 
 def test_seq_is_compile_time():

@@ -5,7 +5,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from fedotmas._addressing import Branch, Loop
-from fedotmas._condition import _pick, from_spec, state_predicate
+from fedotmas._condition import (
+    CALLABLE,
+    PRODUCE_ONCE,
+    _pick,
+    from_spec,
+    state_predicate,
+)
 from fedotmas._inject import bind_async
 from fedotmas.atoms import node_from_fn
 from fedotmas.blackboard import Rule
@@ -174,9 +180,9 @@ def _loop_done(n: BlueprintNode) -> Node:
 def _when(name: str, spec: Any) -> Any:
     """A rule's trigger from its serialized when: the produce-once default (None), a rebuilt
     predicate, or the named error for an opaque callable the blueprint could not carry."""
-    if spec is None or spec == "produce-once":
+    if spec is None or spec == PRODUCE_ONCE:
         return None
-    if spec == "callable":
+    if spec == CALLABLE:
         raise ReconstructError(
             f"rule {name!r}: when= was an opaque callable the blueprint cannot rebuild"
         )
