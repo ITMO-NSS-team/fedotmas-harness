@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from fedotmas._addressing import Branch, Loop
 from fedotmas._condition import _pick, from_spec, state_predicate
 from fedotmas._inject import bind_async
 from fedotmas.atoms import node_from_fn
@@ -54,7 +55,7 @@ def from_blueprint(blueprint: Blueprint, deps: Deps) -> System:
 def _node(n: BlueprintNode, deps: Deps) -> Node:
     match n.kind:
         case Kind.ACTION:
-            return node_from_fn(n.name, _body(n.name, deps), _join(n.reads), n.name)
+            return node_from_fn(n.name, _body(n, deps), _join(n.reads), n.name)
 
         case Kind.GATHER:
             return _collect_node(n.name, list(n.params["srcs"]), n.name)
@@ -87,13 +88,14 @@ def _node(n: BlueprintNode, deps: Deps) -> Node:
             raise ReconstructError(f"node {n.name!r}: unknown kind {n.kind!r}")
 
 
-def _body(name: str, deps: Deps) -> Callable[[Any, View], Any]:
-    """The opaque body a node needs, drawn from Deps by base name (the `#n` build suffix
-    stripped) and adapted to the (input, view) contract. Missing is the named error."""
-    base = name.split("#", 1)[0]
-    fn = deps.bodies.get(base)
+def _body(n: BlueprintNode, deps: Deps) -> Callable[[Any, View], Any]:
+    """The opaque body a node needs, drawn from Deps by its base name and adapted to the
+    (input, view) contract. Missing is the named error."""
+    fn = deps.bodies.get(n.base)
     if fn is None:
-        raise ReconstructError(f"node {name!r}: no body for {base!r} in Deps.bodies")
+        raise ReconstructError(
+            f"node {n.name!r}: no body for {n.base!r} in Deps.bodies"
+        )
     return bind_async(fn)
 
 
@@ -111,7 +113,7 @@ def _nest(n: BlueprintNode, deps: Deps) -> Node:
 def _rule(n: BlueprintNode, deps: Deps) -> Node:
     rule = Rule(
         n.name,
-        deps.bodies.get(n.name) or _missing(n.name),
+        deps.bodies.get(n.base) or _missing(n.name),
         writes=_first(n.writes),
         reads=n.params.get("input", ""),
         when=_when(n.name, n.params.get("when")),
@@ -121,7 +123,8 @@ def _rule(n: BlueprintNode, deps: Deps) -> Node:
 
 
 def _route(n: BlueprintNode) -> Node:
-    name = n.name.removesuffix(":route")
+    addr = Branch.of(n.name)
+    name = addr.base
     spec = n.params["select"]
     cases = list(n.params["cases"])
     if spec.get("by") != "state":
@@ -131,7 +134,7 @@ def _route(n: BlueprintNode) -> Node:
         )
     key = spec["key"]
     entry = _first(n.reads)
-    ins = {k: f"{name}:in:{k}" for k in cases}
+    ins = {k: addr.inlet(k) for k in cases}
     return _route_node(
         name,
         route_reads=entry,
@@ -145,15 +148,15 @@ def _route(n: BlueprintNode) -> Node:
 
 
 def _loop_iter(n: BlueprintNode, deps: Deps) -> Node:
-    name = n.name.removesuffix(":iter")
-    fn, pred = _until(name, n.params["until"])
+    addr = Loop.of(n.name)
+    fn, pred = _until(addr.base, n.params["until"])
     return _loop_iterate_node(
-        name,
+        addr.base,
         body=_inner(n, deps),
-        body_in=f"{name}:in",
-        body_out=f"{name}:out",
+        body_in=addr.body_in,
+        body_out=addr.body_out,
         entry=n.params["entry"],
-        state=f"{name}:s",
+        state=addr.state,
         until=fn,
         pred=pred,
         budget=n.params.get("budget", 100),
@@ -161,10 +164,10 @@ def _loop_iter(n: BlueprintNode, deps: Deps) -> Node:
 
 
 def _loop_done(n: BlueprintNode) -> Node:
-    name = n.name.removesuffix(":done")
-    fn, pred = _until(name, n.params["until"])
+    addr = Loop.of(n.name)
+    fn, pred = _until(addr.base, n.params["until"])
     return _loop_finish_node(
-        name, state=f"{name}:s", out=_first(n.writes), until=fn, pred=pred
+        addr.base, state=addr.state, out=_first(n.writes), until=fn, pred=pred
     )
 
 

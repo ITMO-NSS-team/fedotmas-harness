@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
+from fedotmas._addressing import Branch, Loop, alias, build_id
 from fedotmas._condition import Predicate, spec_of
 from fedotmas.engine.contract import Fact, Kind, Node, Result, Status, View
 from fedotmas.engine.executor import ReactiveExecutor
@@ -26,7 +27,7 @@ class Ctx:
 
     def fresh(self, hint: str) -> str:
         self.n += 1
-        return f"{hint}#{self.n}"
+        return build_id(hint, self.n)
 
 
 def _collect_node(name: str, srcs: list[str], out: str) -> Node:
@@ -48,9 +49,7 @@ def _alias_node(
     async def invoke(input: Any, view: View) -> Result:
         return Result(writes=[Fact(tag=out, value=view.value(src))])
 
-    return as_node(
-        invoke, name=name or f"alias:{out}", reads=src, kind=kind, writes=[out]
-    )
+    return as_node(invoke, name=name or alias(out), reads=src, kind=kind, writes=[out])
 
 
 def _into_node(name: str, state_src: str, reply_src: str, key: str) -> Node:
@@ -126,7 +125,7 @@ def _route_node(
 
     return as_node(
         route,
-        name=f"{name}:route",
+        name=Branch(name).route,
         reads=route_reads,
         kind=Kind.BRANCH_ROUTE,
         writes=list(ins.values()),
@@ -229,7 +228,7 @@ def _loop_iterate_node(
 
     return as_node(
         invoke,
-        name=f"{name}:iter",
+        name=Loop(name).iter,
         reads=f"{state}:*",
         trigger=trigger,
         kind=Kind.LOOP_ITER,
@@ -259,7 +258,7 @@ def _loop_finish_node(
 
     return as_node(
         invoke,
-        name=f"{name}:done",
+        name=Loop(name).done,
         reads=f"{state}:*",
         trigger=trigger,
         kind=Kind.LOOP_DONE,

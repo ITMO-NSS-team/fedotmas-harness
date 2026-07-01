@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
+from fedotmas._addressing import Branch, Loop
 from fedotmas._condition import Predicate, _pick, state_predicate
 from fedotmas._inject import bind_pred
 from fedotmas._outcome import Outcome
@@ -197,8 +198,9 @@ class _Loop(Flow[Any, Any]):
 
     def _build(self, ctx: Ctx, entry: str) -> tuple[list[Node], str]:
         name = ctx.fresh("loop")
-        state = f"{name}:s"
-        body_in, body_out = f"{name}:in", f"{name}:out"
+        addr = Loop(name)
+        state = addr.state
+        body_in, body_out = addr.body_in, addr.body_out
         body = self._body.system(entry=body_in, out=body_out, bind=ctx.bindings)
         nodes = [
             _loop_iterate_node(
@@ -233,7 +235,8 @@ class _Branch(Flow[Any, Any]):
     def _build(self, ctx: Ctx, entry: str) -> tuple[list[Node], str]:
         name = ctx.fresh("branch")
         out = name
-        ins = {k: f"{name}:in:{k}" for k in self._cases}
+        addr = Branch(name)
+        ins = {k: addr.inlet(k) for k in self._cases}
         select = self._select
         nodes: list[Node] = []
 
@@ -263,9 +266,7 @@ class _Branch(Flow[Any, Any]):
             case_nodes, case_out = case._build(ctx, ins[k])
             nodes.extend(case_nodes)
             nodes.append(
-                _alias_node(
-                    case_out, out, name=f"{name}:join:{k}", kind=Kind.BRANCH_JOIN
-                )
+                _alias_node(case_out, out, name=addr.join(k), kind=Kind.BRANCH_JOIN)
             )
         return nodes, out
 

@@ -4,12 +4,14 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from fedotmas._addressing import base_of
 from fedotmas.engine.system import System
 from fedotmas.serialize._dataflow import _edges
 
 
 class BlueprintNode(BaseModel):
     name: str
+    base: str
     kind: str
     reads: list[str]
     writes: list[str]
@@ -46,6 +48,7 @@ def to_blueprint(system: System) -> Blueprint:
         nodes.append(
             BlueprintNode(
                 name=card.name,
+                base=base_of(card.name),
                 kind=card.kind,
                 reads=card.reads,
                 writes=card.writes,
