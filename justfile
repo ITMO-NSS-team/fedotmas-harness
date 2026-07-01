@@ -9,3 +9,9 @@ venv-dev:
 
 docs:
     uv run --group docs mkdocs serve
+
+test-fedotmas:
+    uv run pytest packages/fedotmas/tests
+
+test-fedotmas-llm:
+    uv run pytest packages/fedotmas-llm/tests
