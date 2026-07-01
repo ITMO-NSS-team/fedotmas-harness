@@ -11,7 +11,7 @@ from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.report import StepReport
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
-from fedotmas.engine.terminate import Budget, Goal, Terminate, any_of
+from fedotmas.engine.terminate import Budget, Goal, Terminate
 from fedotmas.flow._nodes import (
     Ctx,
     _alias_node,
@@ -200,23 +200,21 @@ class _Loop(Flow[Any, Any]):
         state = f"{name}:s"
         body_in, body_out = f"{name}:in", f"{name}:out"
         body = self._body.system(entry=body_in, out=body_out, bind=ctx.bindings)
-        round_term: Terminate = Goal(lambda v: v.exists(body_out))
-        if self._budget is not None:
-            round_term = any_of(round_term, Budget(self._budget))
         nodes = [
             _loop_iterate_node(
                 name,
-                body,
-                body_in,
-                body_out,
-                entry,
-                state,
-                self._until,
-                round_term,
-                self._pred,
-                self._budget,
+                body=body,
+                body_in=body_in,
+                body_out=body_out,
+                entry=entry,
+                state=state,
+                until=self._until,
+                pred=self._pred,
+                budget=self._budget,
             ),
-            _loop_finish_node(name, state, name, self._until, self._pred),
+            _loop_finish_node(
+                name, state=state, out=name, until=self._until, pred=self._pred
+            ),
         ]
         return nodes, name
 
@@ -252,13 +250,13 @@ class _Branch(Flow[Any, Any]):
         nodes.append(
             _route_node(
                 name,
-                route_reads,
-                entry,
-                classify,
-                label_tag,
-                ins,
-                self._select_spec,
-                list(self._cases),
+                route_reads=route_reads,
+                entry=entry,
+                classify=classify,
+                label_tag=label_tag,
+                ins=ins,
+                select_spec=self._select_spec,
+                cases=list(self._cases),
             )
         )
         for k, case in self._cases.items():
@@ -350,11 +348,14 @@ class _Nest(Flow[A, B]):
             system = self._target
         else:  # a Board: thread the flow's run-scoped bindings as its rules' fallback
             system = self._target.compile(ctx.bindings)
-        until = self._until or Goal(lambda v: v.exists(inner_out))
-        if self._budget is not None:
-            until = any_of(until, Budget(self._budget))
         nest = _nest_node(
-            name, system, entry, inner_entry, inner_out, until, self._budget
+            name,
+            system=system,
+            entry=entry,
+            inner_entry=inner_entry,
+            inner_out=inner_out,
+            budget=self._budget,
+            until=self._until,
         )
         return [nest], name
 

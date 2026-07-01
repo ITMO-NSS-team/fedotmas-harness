@@ -10,7 +10,6 @@ from fedotmas.atoms import node_from_fn
 from fedotmas.blackboard import Rule
 from fedotmas.engine.contract import Kind, Node, View
 from fedotmas.engine.system import System
-from fedotmas.engine.terminate import Budget, Goal, Terminate, any_of
 from fedotmas.flow._nodes import (
     _alias_node,
     _collect_node,
@@ -88,18 +87,13 @@ def _body(name: str, deps: Deps) -> Callable[[Any, View], Any]:
 
 
 def _nest(n: BlueprintNode, deps: Deps) -> Node:
-    inner_out = n.params["out"]
-    budget = n.params.get("budget", 100)
-    goal: Terminate = Goal(lambda v: v.exists(inner_out))
-    until = any_of(goal, Budget(budget)) if budget is not None else goal
     return _nest_node(
         n.name,
-        _inner(n, deps),
-        _first(n.reads),
-        n.params["entry"],
-        inner_out,
-        until,
-        budget,
+        system=_inner(n, deps),
+        entry=_first(n.reads),
+        inner_entry=n.params["entry"],
+        inner_out=n.params["out"],
+        budget=n.params.get("budget", 100),
     )
 
 
@@ -128,35 +122,39 @@ def _route(n: BlueprintNode) -> Node:
     entry = _first(n.reads)
     ins = {k: f"{name}:in:{k}" for k in cases}
     return _route_node(
-        name, entry, entry, lambda state, view: _pick(state, key), "", ins, spec, cases
+        name,
+        route_reads=entry,
+        entry=entry,
+        classify=lambda state, view: _pick(state, key),
+        label_tag="",
+        ins=ins,
+        select_spec=spec,
+        cases=cases,
     )
 
 
 def _loop_iter(n: BlueprintNode, deps: Deps) -> Node:
     name = n.name.removesuffix(":iter")
     fn, pred = _until(name, n.params["until"])
-    body_out = f"{name}:out"
-    budget = n.params.get("budget", 100)
-    goal: Terminate = Goal(lambda v: v.exists(body_out))
-    round_term = any_of(goal, Budget(budget)) if budget is not None else goal
     return _loop_iterate_node(
         name,
-        _inner(n, deps),
-        f"{name}:in",
-        body_out,
-        n.params["entry"],
-        f"{name}:s",
-        fn,
-        round_term,
-        pred,
-        budget,
+        body=_inner(n, deps),
+        body_in=f"{name}:in",
+        body_out=f"{name}:out",
+        entry=n.params["entry"],
+        state=f"{name}:s",
+        until=fn,
+        pred=pred,
+        budget=n.params.get("budget", 100),
     )
 
 
 def _loop_done(n: BlueprintNode) -> Node:
     name = n.name.removesuffix(":done")
     fn, pred = _until(name, n.params["until"])
-    return _loop_finish_node(name, f"{name}:s", _first(n.writes), fn, pred)
+    return _loop_finish_node(
+        name, state=f"{name}:s", out=_first(n.writes), until=fn, pred=pred
+    )
 
 
 def _when(name: str, spec: Any) -> Any:

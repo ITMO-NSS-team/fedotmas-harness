@@ -5,17 +5,15 @@ from typing import Any
 import pytest
 from fedotmas import Rule, blackboard
 from fedotmas.engine import View
-from fedotmas_llm import PromptRule
+from fedotmas_llm import Call, PromptRule
 
 
 class FakeLLM:
     def __init__(self, reply) -> None:
         self._reply = reply
 
-    async def complete(
-        self, prompt: str, input: Any, view: View, returns: Any = str, tools: Any = None
-    ) -> Any:
-        return self._reply(prompt, input)
+    async def complete(self, call: Call, view: View) -> Any:
+        return self._reply(call.prompt, call.input)
 
 
 async def test_prompt_rule_uses_the_run_scoped_llm():

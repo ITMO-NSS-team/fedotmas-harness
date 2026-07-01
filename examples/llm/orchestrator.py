@@ -3,7 +3,7 @@ import asyncio
 from dotenv import load_dotenv
 from fedotmas import action
 from fedotmas.engine.contract import View
-from fedotmas_llm import agent
+from fedotmas_llm import Call, agent
 from fedotmas_llm.adapters.pydantic_ai import PydanticAI
 from pydantic import BaseModel
 
@@ -32,7 +32,9 @@ synthesize = agent(
 @action
 async def work(p: Plan, view: View) -> list[str]:
     async def one(task: str) -> str:
-        return await llm.complete("Carry out this subtask in one sentence.", task, view)
+        return await llm.complete(
+            Call("Carry out this subtask in one sentence.", task), view
+        )
 
     return list(await asyncio.gather(*(one(s) for s in p.subtasks)))
 

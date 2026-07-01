@@ -5,7 +5,7 @@ from typing import Any, Literal, TypeVar, overload
 from fedotmas.engine.contract import Node, View
 from fedotmas.ext import Ctx, Flow, node_from_fn, render
 
-from fedotmas_llm._llm import LLM
+from fedotmas_llm._llm import LLM, Call
 from fedotmas_llm._tools import Tool
 
 A = TypeVar("A")
@@ -45,11 +45,11 @@ class _LLMAtom(Flow[Any, Any]):
             )
         name, prompt, template = self._name, self._prompt, self._input
         returns, labels, tools = self._returns, self._labels, self._tools
-        extra = {"tools": tools} if tools else {}
 
         async def invoke(value: Any, view: View) -> Any:
             content = render(template, value, view, name) if template else value
-            reply = await llm.complete(prompt, content, view, returns=returns, **extra)
+            call = Call(prompt, content, returns=returns, tools=tuple(tools or ()))
+            reply = await llm.complete(call, view)
             if labels is not None and reply not in labels:
                 raise ValueError(f"agent {name!r} returned {reply!r}, not in {labels}")
             return reply

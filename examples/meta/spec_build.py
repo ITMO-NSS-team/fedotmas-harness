@@ -7,8 +7,8 @@ class EchoLLM:
     def __init__(self, tag: str) -> None:
         self.tag = tag
 
-    async def complete(self, prompt, input, view, returns=None, tools=None):
-        return f"{self.tag}:{input}"
+    async def complete(self, call, view):
+        return f"{self.tag}:{call.input}"
 
 
 PROPOSAL = SystemSpec(

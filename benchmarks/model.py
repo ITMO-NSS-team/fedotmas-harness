@@ -9,7 +9,7 @@ from typing import Any, get_args
 
 from deepeval.models import DeepEvalBaseLLM
 from fedotmas import Flow
-from fedotmas_llm import LLM
+from fedotmas_llm import LLM, Call
 
 _NUM = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
 
@@ -42,13 +42,9 @@ class CountingLLM:
         self.inner = inner
         self.calls = 0
 
-    async def complete(
-        self, prompt: str, input: Any, view: Any, returns: Any = str, tools: Any = None
-    ) -> Any:
+    async def complete(self, call: Call, view: Any) -> Any:
         self.calls += 1
-        return await self.inner.complete(
-            prompt, input, view, returns=returns, tools=tools
-        )
+        return await self.inner.complete(call, view)
 
 
 class FlowModel(DeepEvalBaseLLM):

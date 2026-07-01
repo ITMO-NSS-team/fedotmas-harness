@@ -209,7 +209,7 @@ def selector_row(
     acc = sum(correct[p][t] for p, t in zip(picks, tasks)) / len(tasks)
     cost = sum(calls[p] for p in picks) / len(tasks) + 1  # +1 for the selection call
     picked = [tokens[p] for p in picks]
-    select_tok = (llm.usage["input_tokens"] + llm.usage["output_tokens"]) / len(tasks)
+    select_tok = (llm.usage.input_tokens + llm.usage.output_tokens) / len(tasks)
     tok = (
         sum(t for t in picked if t is not None) / len(tasks) + select_tok
         if all(t is not None for t in picked)

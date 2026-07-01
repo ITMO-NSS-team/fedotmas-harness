@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from fedotmas import branch
 from fedotmas.engine import View
-from fedotmas_llm import agent
+from fedotmas_llm import Call, agent
 from pydantic import BaseModel
 
 
@@ -13,10 +13,8 @@ class FakeLLM:
     def __init__(self, reply) -> None:
         self._reply = reply
 
-    async def complete(
-        self, prompt: str, input: Any, view: View, returns: Any = str, tools: Any = None
-    ) -> Any:
-        return self._reply(prompt, input)
+    async def complete(self, call: Call, view: View) -> Any:
+        return self._reply(call.prompt, call.input)
 
 
 class Patch(BaseModel):

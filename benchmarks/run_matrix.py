@@ -20,6 +20,7 @@ import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import asdict
 from pathlib import Path
 from types import ModuleType
 
@@ -57,7 +58,7 @@ def run_one(pattern: str, domain: ModuleType, args: argparse.Namespace) -> str:
         "llm_calls": config.llm.calls,
         "failures": config.failures,
         "errors": config.errors[:5],
-        "usage": backend.usage,
+        "usage": asdict(backend.usage),
         "seconds": round(time.time() - started, 1),
         "items": suite.predictions.to_dict("records"),
     }
