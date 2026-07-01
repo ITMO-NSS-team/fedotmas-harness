@@ -1,29 +1,23 @@
 """Assemble the results table from recorded runs.
 
-Single run (default): one dir → fixed patterns, random, both oracles, and with --selector
-the live per-task selector row, scored by lookup into that dir's records.
-
-    uv run --group examples --group bench python benchmarks/report.py --bench gsm8k
-
-Aggregate (--runs GLOB): several run dirs of the same (bench, model) → per-cell mean ± std,
-plus a stable per-task oracle (a task counts only for the fraction of runs some pattern got
-it right), which deflates the single-run luck that inflates the per-run oracle.
-
-    uv run --group examples --group bench python benchmarks/report.py \
-        --bench gsm8k --model openrouter:mistralai/ministral-8b-2512 \
-        --runs '.out_gsm8k_gpt4omini-*'
+Usage:
+uv run --group examples --group bench python benchmarks/report.py \
+    --bench gsm8k --model openrouter:mistralai/ministral-8b-2512 \
+    --runs '.out_gsm8k_gpt4omini-*'
 """
 
 from __future__ import annotations
 
 import argparse
-import asyncio
+import importlib
 import json
-from collections import Counter
 from pathlib import Path
 from statistics import mean, stdev
+from typing import TYPE_CHECKING
 
-from dotenv import load_dotenv
+if TYPE_CHECKING:
+    from fedotmas_llm import LLM
+    from fedotmas_meta import SystemSpec
 
 OUT = Path(__file__).parent / "out"
 ORDER = (
@@ -107,7 +101,8 @@ def single(directory: Path, args: argparse.Namespace) -> None:
     )
     rows.append(("oracle per-task", m["oracle_pertask"], None, None))
     if args.selector:
-        rows.append(selector_row(m, args.selector_model))
+        fills = importlib.import_module(args.bench).FILLS
+        rows.append(selector_row(m, args.selector_model, fills))
 
     print(f"\n{args.bench} / {args.model}, n={m['n']}\n")
     print(f"{'configuration':>28}  {'acc':>5}  {'calls/task':>10}  {'tok/task':>9}")
@@ -140,7 +135,8 @@ def aggregate(dirs: list[Path], args: argparse.Namespace) -> None:
     print(f"{'oracle per-task (stable)':>28}  {stable_oracle(ms):11.2f}")
 
     if args.selector:
-        accs = [selector_row(m, args.selector_model)[1] for m in ms]
+        fills = importlib.import_module(args.bench).FILLS
+        accs = [selector_row(m, args.selector_model, fills)[1] for m in ms]
         print(f"{'selector (per-task)':>28}  {_fmt(accs, 11)}")
 
 
@@ -157,32 +153,33 @@ def stable_oracle(ms: list[dict]) -> float:
     return total / len(tasks)
 
 
-def selector_row(m: dict, model: str) -> tuple[str, float, float, float | None]:
-    from fedotmas_llm.adapters.pydantic_ai import PydanticAI
-    from fedotmas_meta import select
-    from fedotmas_meta.presets import get
+_SELECT_PROMPT = (
+    "You design multi-agent systems. Each candidate is given as its full system spec — the"
+    " preset and every agent's prompt. Pick the one that best fits the task.\n{menu}"
+)
 
-    load_dotenv(Path(__file__).parents[1] / ".env")
-    llm = PydanticAI(model)
-    correct, tasks, calls, tokens = m["correct"], m["tasks"], m["calls"], m["tok"]
-    pool = [get(p) for p in correct]  # menu narrows to recorded patterns: picks resolve
 
-    async def pick_all() -> list[str]:
-        picks = await asyncio.gather(*(select(t, llm=llm, presets=pool) for t in tasks))
-        return [p.pattern for p in picks]
+async def select_on_specs(task: str, specs: dict[str, SystemSpec], llm: LLM) -> str:
+    """Pick a pattern by its full SystemSpec — the preset and every agent's prompt, the same
+    proposal a meta-agent emits. The benchmark's selection over the serialized system rather
+    than a hand-written hint; labels stay the pattern names so the recorded-correctness lookup
+    is unchanged."""
+    from fedotmas_llm import agent
 
-    picks = asyncio.run(pick_all())
-    print(f"selector picks: {dict(Counter(picks))}")
-    acc = sum(correct[p][t] for p, t in zip(picks, tasks)) / len(tasks)
-    cost = sum(calls[p] for p in picks) / len(tasks) + 1  # +1 for the selection call
-    picked = [tokens[p] for p in picks]
-    select_tok = (llm.usage["input_tokens"] + llm.usage["output_tokens"]) / len(tasks)
-    tok = (
-        sum(t for t in picked if t is not None) / len(tasks) + select_tok
-        if all(t is not None for t in picked)
-        else None
+    menu = "\n".join(
+        f"- {name}:\n{s.model_dump_json(indent=2)}" for name, s in specs.items()
     )
-    return ("selector (per-task)", acc, cost, tok)
+    pick = agent("select", prompt=_SELECT_PROMPT.format(menu=menu), labels=list(specs))
+    run = await pick.run(task, bind={"llm": llm})
+    if not run.ok:
+        raise RuntimeError(f"selection failed: {run.reason}")
+    return run.value
+
+
+def selector_row(
+    m: dict, model: str, fills: dict
+) -> tuple[str, float, float, float | None]:
+    raise NotImplementedError
 
 
 def main() -> None:

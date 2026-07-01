@@ -6,13 +6,14 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
-from fedotmas.engine.contract import Fact, Node, Result, Status, View
+from fedotmas._condition import Predicate, spec_of
+from fedotmas.engine.contract import Fact, Kind, Node, Result, Status, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.node import as_node
 from fedotmas.engine.report import Run
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
-from fedotmas.engine.terminate import Terminate
+from fedotmas.engine.terminate import Budget, Goal, Terminate, any_of
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -32,14 +33,24 @@ def _collect_node(name: str, srcs: list[str], out: str) -> Node:
     async def invoke(input: Any, view: View) -> Result:
         return Result(writes=[Fact(tag=out, value=[view.value(s) for s in srcs])])
 
-    return as_node(invoke, name=name, reads=" ".join(srcs))
+    return as_node(
+        invoke,
+        name=name,
+        reads=" ".join(srcs),
+        kind=Kind.GATHER,
+        params={"srcs": srcs},
+    )
 
 
-def _alias_node(src: str, out: str, name: str | None = None) -> Node:
+def _alias_node(
+    src: str, out: str, name: str | None = None, kind: str = Kind.ALIAS
+) -> Node:
     async def invoke(input: Any, view: View) -> Result:
         return Result(writes=[Fact(tag=out, value=view.value(src))])
 
-    return as_node(invoke, name=name or f"alias:{out}", reads=src)
+    return as_node(
+        invoke, name=name or f"alias:{out}", reads=src, kind=kind, writes=[out]
+    )
 
 
 def _into_node(name: str, state_src: str, reply_src: str, key: str) -> Node:
@@ -56,7 +67,13 @@ def _into_node(name: str, state_src: str, reply_src: str, key: str) -> Node:
             writes=[Fact(tag=name, value={**state, key: view.value(reply_src)})]
         )
 
-    return as_node(invoke, name=name, reads=f"{state_src} {reply_src}")
+    return as_node(
+        invoke,
+        name=name,
+        reads=f"{state_src} {reply_src}",
+        kind=Kind.INTO,
+        params={"key": key, "state": state_src, "reply": reply_src},
+    )
 
 
 def _merge_node(name: str, state_src: str, reply_src: str) -> Node:
@@ -74,7 +91,86 @@ def _merge_node(name: str, state_src: str, reply_src: str) -> Node:
             )
         return Result(writes=[Fact(tag=name, value={**state, **patch})])
 
-    return as_node(invoke, name=name, reads=f"{state_src} {reply_src}")
+    return as_node(
+        invoke,
+        name=name,
+        reads=f"{state_src} {reply_src}",
+        kind=Kind.MERGE,
+        params={"state": state_src, "reply": reply_src},
+    )
+
+
+def _route_node(
+    name: str,
+    *,
+    route_reads: str,
+    entry: str,
+    classify: Callable[[Any, View], str] | None,
+    label_tag: str,
+    ins: dict[str, str],
+    select_spec: dict[str, Any],
+    cases: list[str],
+) -> Node:
+    """Route the input to one case's inlet by a label: a python classifier over the value, or
+    the label fact a select flow wrote. The case keys and their inlet tags are fixed at build,
+    so the route only chooses among them."""
+
+    async def route(input: Any, view: View) -> Result:
+        value = view.value(entry) if entry else None
+        key = classify(value, view) if classify is not None else view.value(label_tag)
+        if key not in ins:
+            raise ValueError(
+                f"branch {name!r} got label {key!r}, not one of {sorted(ins)}"
+            )
+        return Result(writes=[Fact(tag=ins[key], value=value)])
+
+    return as_node(
+        route,
+        name=f"{name}:route",
+        reads=route_reads,
+        kind=Kind.BRANCH_ROUTE,
+        writes=list(ins.values()),
+        params={"select": select_spec, "cases": cases},
+    )
+
+
+def _nest_node(
+    name: str,
+    *,
+    system: System,
+    entry: str,
+    inner_entry: str,
+    inner_out: str,
+    budget: int | None,
+    until: Terminate | None = None,
+) -> Node:
+    """Run a whole sub-system as one node: seed its own inner store with the outer input, run
+    until the inner output exists (or `until`, if given), write it back as one fact. The interior
+    stays opaque to the outer engine; a failure surfaces as this node's error. `budget` is the
+    inner superstep cap folded into the terminate here, stamped on the Card so the round-trip
+    restores the same bound."""
+    term: Terminate = until or Goal(lambda v: v.exists(inner_out))
+    if budget is not None:
+        term = any_of(term, Budget(budget))
+
+    async def invoke(input: Any, view: View) -> Result:
+        run = await ReactiveExecutor().run(
+            system,
+            Store(),
+            seed=[Fact(tag=inner_entry, value=view.value(entry) if entry else None)],
+            terminate=term,
+        )
+        _inner_guard(run, inner_out, f"nest {name!r}")
+        return Result(writes=[Fact(tag=name, value=run.view.value(inner_out))])
+
+    return as_node(
+        invoke,
+        name=name,
+        reads=entry,
+        kind=Kind.NEST,
+        params={"entry": inner_entry, "out": inner_out, "budget": budget},
+        system=system,
+    )
 
 
 def _inner_guard(run: Run, out: str, what: str) -> None:
@@ -93,17 +189,24 @@ def _inner_guard(run: Run, out: str, what: str) -> None:
 
 def _loop_iterate_node(
     name: str,
+    *,
     body: System,
     body_in: str,
     body_out: str,
     entry: str,
     state: str,
     until: Callable[[Any, View], bool],
-    round_term: Terminate,
+    pred: Predicate | None,
+    budget: int | None,
 ) -> Node:
     """One round per firing: feed the latest state (the entry fact on round one) into the
     body in a fresh inner store, write its output as the next state version. Re-arms while
-    `until` has not yet cleared on the latest state."""
+    `until` has not yet cleared on the latest state. `budget` is the per-round superstep cap
+    folded into the round terminate here, stamped on the Card so the round-trip restores the
+    same bound."""
+    round_term: Terminate = Goal(lambda v: v.exists(body_out))
+    if budget is not None:
+        round_term = any_of(round_term, Budget(budget))
 
     async def invoke(input: Any, view: View) -> Result:
         seen = view.query(f"{state}:*")
@@ -124,11 +227,25 @@ def _loop_iterate_node(
             return view.exists(entry) if entry else True
         return not until(seen[-1].value, view)
 
-    return as_node(invoke, name=f"{name}:iter", reads=f"{state}:*", trigger=trigger)
+    return as_node(
+        invoke,
+        name=f"{name}:iter",
+        reads=f"{state}:*",
+        trigger=trigger,
+        kind=Kind.LOOP_ITER,
+        writes=[f"{state}:*"],
+        params={"until": spec_of(pred), "entry": entry, "budget": budget},
+        system=body,
+    )
 
 
 def _loop_finish_node(
-    name: str, state: str, out: str, until: Callable[[Any, View], bool]
+    name: str,
+    *,
+    state: str,
+    out: str,
+    until: Callable[[Any, View], bool],
+    pred: Predicate | None,
 ) -> Node:
     """Copy the final state version to the loop's output once `until` clears; fires once,
     guarded by the output not existing yet."""
@@ -140,4 +257,12 @@ def _loop_finish_node(
         seen = view.query(f"{state}:*")
         return bool(seen) and until(seen[-1].value, view) and not view.exists(out)
 
-    return as_node(invoke, name=f"{name}:done", reads=f"{state}:*", trigger=trigger)
+    return as_node(
+        invoke,
+        name=f"{name}:done",
+        reads=f"{state}:*",
+        trigger=trigger,
+        kind=Kind.LOOP_DONE,
+        writes=[out],
+        params={"until": spec_of(pred)},
+    )

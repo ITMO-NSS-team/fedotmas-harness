@@ -37,17 +37,17 @@ flow = agent("summarize", prompt="Summarize in one sentence.") + count
 
 ## The backend seam
 
-A backend is anything with one method: `complete(prompt, input, view, returns) -> value`. Any agent SDK plugs in, and the engine never imports a provider:
+A backend is anything with one method: `complete(call, view) -> value`, where `call` bundles the prompt, input, declared output type, and tools. Any agent SDK plugs in, and the engine never imports a provider:
 
 ```python
 class Echo:
-    async def complete(self, prompt, input, view, returns=str):
-        return f"{prompt}: {input}"
+    async def complete(self, call, view):
+        return f"{call.prompt}: {call.input}"
 
 run = await flow.run("topic", bind={"llm": Echo()})
 ```
 
-`PydanticAI` is the batteries-included adapter, with structured output and token accounting. See [examples/sdk-llm/backends.py](../../examples/sdk-llm/backends.py) for binding others.
+`PydanticAI` is the batteries-included adapter, with structured output and token accounting. See [examples/llm/backends.py](../../examples/llm/backends.py) for binding others.
 
 ## Classify and route
 

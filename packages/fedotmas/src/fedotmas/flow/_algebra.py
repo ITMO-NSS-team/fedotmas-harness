@@ -3,26 +3,26 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
+from fedotmas._condition import Predicate, _pick, state_predicate
 from fedotmas._inject import bind_pred
-from fedotmas.engine.contract import Fact, Node, Result, View
+from fedotmas._outcome import Outcome
+from fedotmas.engine.contract import Fact, Kind, Node, View
 from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.node import as_node
 from fedotmas.engine.report import StepReport
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
-from fedotmas.engine.terminate import Budget, Goal, Terminate, any_of
-from fedotmas.flow._condition import Condition, _as_predicate, _pick
+from fedotmas.engine.terminate import Budget, Goal, Terminate
 from fedotmas.flow._nodes import (
     Ctx,
     _alias_node,
     _collect_node,
-    _inner_guard,
     _into_node,
     _loop_finish_node,
     _loop_iterate_node,
     _merge_node,
+    _nest_node,
+    _route_node,
 )
-from fedotmas._outcome import Outcome
 
 if TYPE_CHECKING:
     from fedotmas.blackboard import Board
@@ -131,22 +131,23 @@ class Flow(Generic[A, B]):
 
     def loop(
         self: Flow[A, A],
-        until: Callable[[A], bool] | Callable[[A, View], bool] | Condition | str,
+        until: Callable[[A], bool] | Callable[[A, View], bool] | Predicate | str,
         *,
         budget: int | None = 100,
     ) -> Flow[A, A]:
         """Iterate the flow, feeding each round's output in as the next round's input, until
         `until` clears. `until` is a callable over the state (optionally the state and the
-        view), a Condition, or a state key (stop when state[key] is truthy). Each round runs
-        the body in its own inner store as one outer superstep, so rounds are capped by the
-        outer budget but a round itself is not; `budget` caps the supersteps inside one round
-        (default 100, None lifts it).
+        view), a Condition or its `&`/`|`/`~` composition, or a state key (stop when state[key]
+        is truthy). Each round runs the body in its own inner store as one outer superstep, so
+        rounds are capped by the outer budget but a round itself is not; `budget` caps the
+        supersteps inside one round (default 100, None lifts it).
 
         Example:
             revise.loop(until="approved")  # stop when state["approved"] is truthy
             revise.loop(until=lambda s: s["score"] >= 0.9)
         """
-        return _Loop(self, _as_predicate(until), budget)
+        fn, pred = state_predicate(until)
+        return _Loop(self, fn, pred, budget)
 
 
 class _Seq(Flow[Any, Any]):
@@ -186,10 +187,12 @@ class _Loop(Flow[Any, Any]):
         self,
         body: Flow[Any, Any],
         until: Callable[[Any, View], bool],
+        pred: Predicate | None,
         budget: int | None,
     ) -> None:
         self._body = body
         self._until = until
+        self._pred = pred
         self._budget = budget
 
     def _build(self, ctx: Ctx, entry: str) -> tuple[list[Node], str]:
@@ -197,14 +200,21 @@ class _Loop(Flow[Any, Any]):
         state = f"{name}:s"
         body_in, body_out = f"{name}:in", f"{name}:out"
         body = self._body.system(entry=body_in, out=body_out, bind=ctx.bindings)
-        round_term: Terminate = Goal(lambda v: v.exists(body_out))
-        if self._budget is not None:
-            round_term = any_of(round_term, Budget(self._budget))
         nodes = [
             _loop_iterate_node(
-                name, body, body_in, body_out, entry, state, self._until, round_term
+                name,
+                body=body,
+                body_in=body_in,
+                body_out=body_out,
+                entry=entry,
+                state=state,
+                until=self._until,
+                pred=self._pred,
+                budget=self._budget,
             ),
-            _loop_finish_node(name, state, name, self._until),
+            _loop_finish_node(
+                name, state=state, out=name, until=self._until, pred=self._pred
+            ),
         ]
         return nodes, name
 
@@ -214,9 +224,11 @@ class _Branch(Flow[Any, Any]):
         self,
         select: Flow[Any, Any] | Callable[[Any, View], str],
         cases: dict[str, Flow[Any, Any]],
+        select_spec: dict[str, Any],
     ) -> None:
         self._select = select
         self._cases = cases
+        self._select_spec = select_spec
 
     def _build(self, ctx: Ctx, entry: str) -> tuple[list[Node], str]:
         name = ctx.fresh("branch")
@@ -235,22 +247,26 @@ class _Branch(Flow[Any, Any]):
             classify = select
             route_reads = entry
 
-        async def route(input: Any, view: View) -> Result:
-            value = view.value(entry) if entry else None
-            key = (
-                classify(value, view) if classify is not None else view.value(label_tag)
+        nodes.append(
+            _route_node(
+                name,
+                route_reads=route_reads,
+                entry=entry,
+                classify=classify,
+                label_tag=label_tag,
+                ins=ins,
+                select_spec=self._select_spec,
+                cases=list(self._cases),
             )
-            if key not in ins:
-                raise ValueError(
-                    f"branch {name!r} got label {key!r}, not one of {sorted(ins)}"
-                )
-            return Result(writes=[Fact(tag=ins[key], value=value)])
-
-        nodes.append(as_node(route, name=f"{name}:route", reads=route_reads))
+        )
         for k, case in self._cases.items():
             case_nodes, case_out = case._build(ctx, ins[k])
             nodes.extend(case_nodes)
-            nodes.append(_alias_node(case_out, out, name=f"{name}:join:{k}"))
+            nodes.append(
+                _alias_node(
+                    case_out, out, name=f"{name}:join:{k}", kind=Kind.BRANCH_JOIN
+                )
+            )
         return nodes, out
 
 
@@ -270,10 +286,11 @@ def branch(
     """
     if isinstance(select, str):
         key = select
-        return _Branch(lambda state, view: _pick(state, key), cases)
+        spec: dict[str, Any] = {"by": "state", "key": key}
+        return _Branch(lambda state, view: _pick(state, key), cases, spec)
     if not isinstance(select, Flow):
-        return _Branch(bind_pred(select), cases)
-    return _Branch(select, cases)
+        return _Branch(bind_pred(select), cases, {"by": "callable"})
+    return _Branch(select, cases, {"by": "flow"})
 
 
 class _Gather(Flow[Any, Any]):
@@ -331,24 +348,16 @@ class _Nest(Flow[A, B]):
             system = self._target
         else:  # a Board: thread the flow's run-scoped bindings as its rules' fallback
             system = self._target.compile(ctx.bindings)
-        until = self._until or Goal(lambda v: v.exists(inner_out))
-        if self._budget is not None:
-            until = any_of(until, Budget(self._budget))
-
-        async def invoke(input: Any, view: View) -> Result:
-            inner = Store()
-            run = await ReactiveExecutor().run(
-                system,
-                inner,
-                seed=[
-                    Fact(tag=inner_entry, value=view.value(entry) if entry else None)
-                ],
-                terminate=until,
-            )
-            _inner_guard(run, inner_out, f"nest {name!r}")
-            return Result(writes=[Fact(tag=name, value=run.view.value(inner_out))])
-
-        return [as_node(invoke, name=name, reads=entry)], name
+        nest = _nest_node(
+            name,
+            system=system,
+            entry=entry,
+            inner_entry=inner_entry,
+            inner_out=inner_out,
+            budget=self._budget,
+            until=self._until,
+        )
+        return [nest], name
 
 
 def nest(

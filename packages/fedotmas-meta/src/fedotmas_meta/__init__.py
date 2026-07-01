@@ -1,12 +1,3 @@
-from fedotmas_meta._select import Selection, select
-from fedotmas_meta.presets import Fill, Preset, RoleSpec, catalog, get
+from fedotmas_meta._spec import AgentSpec, Preset, RoleSpec, SystemSpec
 
-__all__ = [
-    "Fill",
-    "Preset",
-    "RoleSpec",
-    "Selection",
-    "catalog",
-    "get",
-    "select",
-]
+__all__ = ["AgentSpec", "Preset", "RoleSpec", "SystemSpec"]

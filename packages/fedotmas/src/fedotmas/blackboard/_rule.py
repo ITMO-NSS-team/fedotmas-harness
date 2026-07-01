@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import Any
 
+from fedotmas._condition import Predicate, spec_of, view_predicate
 from fedotmas._inject import bind_async
-from fedotmas.engine.contract import Fact, Node, Result, View
+from fedotmas.engine.contract import Fact, Kind, Node, Result, View
 from fedotmas.engine.node import as_node
 
 # A rule's code body of either arity: `async (input)` or `async (input, view)`. The union keeps
@@ -31,7 +32,8 @@ class Rule:
     `async (input, view)`, where the trailing view is optional. `when` defaults to produce-once,
     fire when `reads` exists and `writes` does not yet, so a pipeline rule needs no trigger;
     supply `when` for opportunistic activation, as a sequence of tags that must all exist
-    (`"!tag"` for must-not-exist) or, past presence tests, a callable over the View. `meta`
+    (`"!tag"` for must-not-exist), a Condition over the view (or its `&`/`|`/`~` composition),
+    or, past those, a callable over the View. `meta`
     rides along to the node, e.g. an auction bid that a Policy reads back off
     `node.describe().meta`. A rule whose body is a prompt instead of code is PromptRule in the
     fedotmas-llm extension, a subclass that overrides `_body`; the blackboard itself is
@@ -42,7 +44,7 @@ class Rule:
     fn: StepFn | None = None
     writes: str = ""
     reads: str = ""
-    when: When | Sequence[str] | None = None
+    when: When | Sequence[str] | Predicate | None = None
     meta: dict[str, Any] = field(default_factory=dict)
 
     def _body(self, bind: Mapping[str, Any]) -> _BoundFn:
@@ -69,7 +71,7 @@ class Rule:
                 "facts with when= and read them off the view"
             )
         when = self.when
-        if when is None or callable(when):
+        if when is None or isinstance(when, Predicate) or callable(when):
             return
         if isinstance(when, str) or not when or any(t in ("", "!") for t in when):
             raise ValueError(
@@ -83,19 +85,17 @@ class Rule:
                 f"rule {self.name!r}: when= both requires and forbids {sorted(clash)}"
             )
 
-    def _as_when(self) -> tuple[When, list[str]]:
-        """The rule's trigger plus the positive when tags, which join its re-fire identity."""
+    def _compile_when(self) -> tuple[When, list[str], dict[str, Any] | str]:
+        """The rule's trigger, the positive keys that join its re-fire identity, and the
+        declarative spec for the Card. produce-once and a raw callable stay opaque markers; a
+        tag list or a Condition compile through one view predicate and serialize in full."""
         when = self.when
         if when is None:
-            return _produce_once(self.reads, self.writes), []
-        if callable(when):
-            return cast(When, when), []
-        need = [t for t in when if not t.startswith("!")]
-        veto = [t[1:] for t in when if t.startswith("!")]
-        trigger = lambda v: (  # noqa: E731
-            all(v.exists(t) for t in need) and not any(v.exists(t) for t in veto)
-        )
-        return trigger, need
+            return _produce_once(self.reads, self.writes), [], "produce-once"
+        trigger, pred = view_predicate(when)
+        if pred is None:
+            return trigger, [], "callable"
+        return trigger, pred.positive_keys(), spec_of(pred)
 
     def _identity(self, need: list[str]) -> str:
         """The reads the engine dedups re-fires on: the input fact plus the positive when tags."""
@@ -113,11 +113,14 @@ class Rule:
             value = await fn(view.value(self.reads) if self.reads else None, view)
             return Result(writes=[Fact(tag=self.writes, value=value)])
 
-        trigger, need = self._as_when()
+        trigger, need, when_desc = self._compile_when()
         return as_node(
             invoke,
             name=self.name,
             reads=self._identity(need),
             trigger=trigger,
             meta=self.meta,
+            kind=Kind.RULE,
+            writes=[self.writes],
+            params={"when": when_desc, "input": self.reads},
         )

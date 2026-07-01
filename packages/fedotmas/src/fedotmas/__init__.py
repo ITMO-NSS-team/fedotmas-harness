@@ -1,7 +1,10 @@
+from fedotmas._condition import Condition
 from fedotmas._outcome import Outcome, RunError
+from fedotmas._run import run
 from fedotmas.atoms import action
 from fedotmas.blackboard import Board, Rule, blackboard
-from fedotmas.flow import Condition, Flow, branch, gather, nest
+from fedotmas.engine.contract import View
+from fedotmas.flow import Flow, branch, gather, nest
 
 __all__ = [
     "Board",
@@ -10,9 +13,11 @@ __all__ = [
     "Outcome",
     "RunError",
     "Rule",
+    "View",
     "action",
     "blackboard",
     "branch",
     "gather",
     "nest",
+    "run",
 ]

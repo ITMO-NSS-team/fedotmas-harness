@@ -1,18 +1,15 @@
-"""Orchestrator-Workers (P9): planner decides the subtask count at runtime.
-
-The width is unknown at design time: the planner emits N subtask facts, the worker
-maps over whatever is there, the reducer joins. True per-item concurrency would use a
-bounded worker pool; here one worker batch-maps the runtime-sized set.
-"""
-
 import asyncio
 
-from fedotmas.engine import as_node
-from fedotmas.engine.contract import Fact, Result, View
-from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.store import Store
-from fedotmas.engine.system import System
-from fedotmas.engine.terminate import Goal
+from fedotmas.engine import (
+    Fact,
+    Goal,
+    ReactiveExecutor,
+    Result,
+    Store,
+    System,
+    View,
+    as_node,
+)
 
 SUBTASKS = ["x", "y", "z"]
 

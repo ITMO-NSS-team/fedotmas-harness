@@ -3,22 +3,22 @@ import asyncio
 from fedotmas import Flow, action, gather
 
 # The trailing `view` of an action body is optional: drop it when the body does not read
-# the store. Add `view: View` (from fedotmas.engine.contract) back when a body needs it.
+# the store. Add `view: View` (from fedotmas) back when a body needs it.
 
 
 @action
 async def research(topic: str) -> str:
-    return f"facts about {topic}"
+    return f"researched {topic}"
 
 
 @action
 async def write(facts: str) -> str:
-    return f"draft from {facts}"
+    return f"{facts} -> written"
 
 
 @action
 async def edit(draft: str) -> str:
-    return f"edited {draft}"
+    return f"{draft} -> edited"
 
 
 @action

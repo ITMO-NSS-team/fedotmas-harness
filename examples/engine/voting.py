@@ -1,19 +1,17 @@
-"""Voting (P3 Self-Consistency, P4 Ensemble): replicate -> join(vote).
-
-Self-Consistency = one model sampled N times; Ensemble = N distinct models.
-On the engine they are identical: parallel fan-out into a majority aggregator.
-"""
-
 import asyncio
 from collections import Counter
 from collections.abc import Awaitable, Callable
 
-from fedotmas.engine import as_node
-from fedotmas.engine.contract import Fact, Result, View
-from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.store import Store
-from fedotmas.engine.system import System
-from fedotmas.engine.terminate import Goal
+from fedotmas.engine import (
+    Fact,
+    Goal,
+    ReactiveExecutor,
+    Result,
+    Store,
+    System,
+    View,
+    as_node,
+)
 
 BALLOTS = {"s1": "A", "s2": "A", "s3": "B", "s4": "A", "s5": "B"}
 

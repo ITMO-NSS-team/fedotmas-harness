@@ -1,6 +1,7 @@
 """Termination conditions: validation, the index axis, operator and function composition."""
 
 import pytest
+from fedotmas import Condition
 from fedotmas.engine import (
     Budget,
     Fact,
@@ -52,6 +53,15 @@ def test_any_of_lifts_a_bare_protocol_terminate():
 
     assert any_of(Always(), Budget(5)).done(EMPTY, report())
     assert not all_of(Always(), Budget(5)).done(EMPTY, report())
+
+
+def test_goal_accepts_a_condition_over_the_view():
+    term = Goal(Condition(key="score", op="gte", value=3))
+    store = Store()
+    store.commit([Fact(tag="score", value=1, step=0)])
+    assert not term.done(store.snapshot(), report())
+    store.commit([Fact(tag="score", value=5, step=1)])
+    assert term.done(store.snapshot(), report())
 
 
 @pytest.mark.parametrize("compose", [all_of, any_of])

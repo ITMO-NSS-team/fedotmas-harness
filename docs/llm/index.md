@@ -9,7 +9,7 @@ Install it with the bundled backend:
 pip install fedotmas-llm[pydantic-ai]
 ```
 
-The package re-exports three names, `agent`, `PromptRule`, and the `LLM` protocol; the backend ships under `fedotmas_llm.adapters.pydantic_ai`.
+The package re-exports `agent`, `PromptRule`, the `LLM` protocol, and its `Call`/`Usage` value types; the backend ships under `fedotmas_llm.adapters.pydantic_ai`.
 
 ## The LLM seam
 
@@ -18,12 +18,10 @@ That seam is one protocol, a parameter you pass, never a way into the engine.
 
 ```python
 class LLM(Protocol):
-    async def complete(
-        self, prompt: str, input: Any, view: View, returns: Any = str
-    ) -> Any: ...
+    async def complete(self, call: Call, view: View) -> Any: ...
 ```
 
-`returns` carries the declared output type of the node, so a backend that supports structured output can produce that type directly, while a plain text backend ignores it.
+A `Call` bundles the node's prompt, the rendered input, the declared output type (`call.returns`), and its tools; `view` is the run's store handle, passed beside it. A backend that supports structured output reads `call.returns` to produce that type directly, while a plain text backend ignores it.
 Anything with that method is a backend: a model client, a whole framework, a stub, a fake in a test.
 
 ## Binding a backend

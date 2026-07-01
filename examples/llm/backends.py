@@ -4,7 +4,7 @@ from typing import Any
 from dotenv import load_dotenv
 from fedotmas import action, gather
 from fedotmas.engine.contract import View
-from fedotmas_llm import agent
+from fedotmas_llm import Call, agent
 from fedotmas_llm.adapters.pydantic_ai import PydanticAI
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -18,10 +18,8 @@ class LangChain:
     def __init__(self, model: str) -> None:
         self._model = init_chat_model(model)
 
-    async def complete(
-        self, prompt: str, input: Any, view: View, returns: Any = str
-    ) -> Any:
-        messages = [SystemMessage(prompt), HumanMessage(str(input))]
+    async def complete(self, call: Call, view: View) -> Any:
+        messages = [SystemMessage(call.prompt), HumanMessage(str(call.input))]
         reply = await self._model.ainvoke(messages)
         return reply.content
 

@@ -1,15 +1,17 @@
-"""Contract-Net (P14): bidders contend for a task, an auction Policy awards the winner."""
-
 import asyncio
 from collections.abc import Awaitable, Callable
 
-from fedotmas.engine import as_node
-from fedotmas.engine.contract import Fact, Result, View
-from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.policy import AuctionSelect
-from fedotmas.engine.store import Store
-from fedotmas.engine.system import System
-from fedotmas.engine.terminate import Goal
+from fedotmas.engine import (
+    AuctionSelect,
+    Fact,
+    Goal,
+    ReactiveExecutor,
+    Result,
+    Store,
+    System,
+    View,
+    as_node,
+)
 
 BIDS = {"w1": 0.3, "w2": 0.9, "w3": 0.5}
 

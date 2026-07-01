@@ -5,7 +5,13 @@ from typing import Any
 
 from fedotmas.engine.contract import View
 from pydantic import BaseModel
-from pydantic_ai import Agent
+from pydantic_ai import Agent, Tool
+from pydantic_ai.mcp import MCPToolset
+from pydantic_ai.models import Model, infer_model
+from pydantic_ai.usage import RunUsage
+
+from fedotmas_llm._llm import Call, Usage
+from fedotmas_llm._tools import FunctionTool, MCPTool
 
 
 def _as_text(input: Any) -> str:
@@ -16,30 +22,42 @@ def _as_text(input: Any) -> str:
     return json.dumps(input, ensure_ascii=False, default=str)
 
 
-_METERS = ("input_tokens", "output_tokens", "requests")
+def _split(tools: tuple[Any, ...]) -> tuple[list[Tool], list[Any]]:
+    """Route fedotmas descriptors to pydantic-ai's two slots: FunctionTool -> tools=,
+    MCPTool -> toolsets= (MCPToolset reads the transport off the url)."""
+    fns = [Tool(t.fn, name=t.name) for t in tools if isinstance(t, FunctionTool)]
+    servers = [MCPToolset(t.url) for t in tools if isinstance(t, MCPTool)]
+    return fns, servers
 
 
 class PydanticAI:
-    """An LLM backend over pydantic-ai Agent."""
+    """An LLM backend over pydantic-ai Agent. The model client is inferred once on first use and
+    reused across calls; each call builds a lightweight Agent for the node's prompt, output type,
+    and tools, and accumulates token usage into one running total."""
 
     def __init__(self, model: str, **settings: Any) -> None:
         self._model = model
         self._settings = settings
-        # caches agents
-        self._agents: dict[tuple[str, Any], Agent] = {}
-        self.usage: dict[str, int] = dict.fromkeys(_METERS, 0)
+        self._model_obj: Model | None = None
+        self._usage = RunUsage()
 
-    async def complete(
-        self, prompt: str, input: Any, view: View, returns: Any = str
-    ) -> Any:
-        agent = self._agents.get((prompt, returns))
-        if agent is None:
-            agent = Agent(
-                self._model, output_type=returns, system_prompt=prompt, **self._settings
-            )
-            self._agents[(prompt, returns)] = agent
-        result = await agent.run(_as_text(input))
-        used = result.usage
-        for key in _METERS:
-            self.usage[key] = self.usage.get(key, 0) + (getattr(used, key) or 0)
+    @property
+    def usage(self) -> Usage:
+        return Usage(
+            self._usage.input_tokens, self._usage.output_tokens, self._usage.requests
+        )
+
+    async def complete(self, call: Call, view: View) -> Any:
+        if self._model_obj is None:
+            self._model_obj = infer_model(self._model)
+        fns, servers = _split(call.tools)
+        agent = Agent(
+            self._model_obj,
+            output_type=call.returns,
+            system_prompt=call.prompt,
+            tools=fns,
+            toolsets=servers,
+            **self._settings,
+        )
+        result = await agent.run(_as_text(call.input), usage=self._usage)
         return result.output

@@ -3,17 +3,15 @@ from typing import Any
 
 from fedotmas import Flow, action, branch
 from fedotmas.engine.contract import View
-from fedotmas_llm import agent
+from fedotmas_llm import Call, agent
 
 
 class FakeLLM:
     def __init__(self, reply) -> None:
         self._reply = reply
 
-    async def complete(
-        self, prompt: str, input: Any, view: View, returns: type = str
-    ) -> Any:
-        return self._reply(prompt, input)
+    async def complete(self, call: Call, view: View) -> Any:
+        return self._reply(call.prompt, call.input)
 
 
 @action

@@ -4,7 +4,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
 from fedotmas._inject import bind_async
-from fedotmas.engine.contract import Fact, Node, Result, View
+from fedotmas.engine.contract import Fact, Kind, Node, Result, View
 from fedotmas.engine.node import as_node
 from fedotmas.flow._algebra import Flow
 from fedotmas.flow._nodes import Ctx
@@ -30,7 +30,7 @@ def node_from_fn(name: str, fn: _BoundFn, reads: str, out: str) -> Node:
         value = await fn(view.value(reads) if reads else None, view)
         return Result(writes=[Fact(tag=out, value=value)])
 
-    return as_node(invoke, name=name, reads=reads)
+    return as_node(invoke, name=name, reads=reads, kind=Kind.ACTION)
 
 
 class _Action(Flow[A, B]):

@@ -141,6 +141,28 @@ def test_condition_ordered_op_needs_the_key_present():
         Condition(key="k", op="gt", value=1).check({})
 
 
+def test_condition_composition_is_boolean_algebra():
+    pred = Condition(key="a") & (Condition(key="b") | ~Condition(key="c"))
+    assert pred.check({"a": 1, "b": 0, "c": 0})
+    assert not pred.check({"a": 0, "b": 1, "c": 1})
+    assert not pred.check({"a": 1, "b": 0, "c": 1})
+
+
+def test_condition_tree_round_trips_through_json():
+    pred = Condition(key="a") & ~Condition(key="b", op="exists")
+    again = type(pred).model_validate_json(pred.model_dump_json(by_alias=True))
+    assert again.check({"a": 1}) and not again.check({"a": 1, "b": 2})
+
+
+async def test_loop_until_composed_condition():
+    run = (
+        await action(bump)
+        .loop(Condition(key="n", op="gte", value=2) | Condition(key="stop"))
+        .run({"n": 0})
+    )
+    assert run.value == {"n": 2}
+
+
 async def test_action_name_shows_in_the_trace():
     run = await action(lambda x, view: echo(x, view), name="ident").run("hello")
     fired = {n for s in run.steps for n in s.fired}
