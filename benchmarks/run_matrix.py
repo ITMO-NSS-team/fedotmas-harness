@@ -1,12 +1,5 @@
-"""Run the pattern x benchmark matrix; one JSON record file per configuration.
+"""Run the pattern x benchmark matrix.
 
-Each pattern is built through fedotmas_meta.assemble over the catalog in presets.py; today
-only blackboard resolves end-to-end. The full matrix also needs the single/chain/
-eval_optimizer/orchestrator/router presets ported into presets.py and the domains' debate
-fills realigned to the voters/judge preset (still the old pro/con/judge roles).
-
-A benchmark is a folder exposing suite(n, seed) and FILLS (see gsm8k/). The model is
-a full pydantic-ai spec: openai-responses:gpt-4o-mini, openrouter:qwen/qwen3-30b, ...
 Usage:
 uv run --group examples --group bench python benchmarks/run_matrix.py \
     --bench gsm8k --n 5 --patterns blackboard
@@ -16,21 +9,14 @@ from __future__ import annotations
 
 import argparse
 import importlib
-import json
 import os
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import asdict
 from pathlib import Path
 from types import ModuleType
 
 os.environ.setdefault("DEEPEVAL_TELEMETRY_OPT_OUT", "YES")
 
 from dotenv import load_dotenv  # noqa: E402
-from fedotmas_llm.adapters.pydantic_ai import PydanticAI  # noqa: E402
-from fedotmas_meta import assemble  # noqa: E402
-from model import FlowModel  # noqa: E402
-from presets import CATALOG, spec  # noqa: E402
 
 OUT = Path(__file__).parent / "out"
 
@@ -40,34 +26,7 @@ def slug(model: str) -> str:
 
 
 def run_one(pattern: str, domain: ModuleType, args: argparse.Namespace) -> str:
-    flow = assemble(spec(pattern, domain.FILLS), presets=CATALOG)
-    backend = PydanticAI(args.model)
-    config = FlowModel(f"{pattern}/{args.model}", flow, backend)
-    suite = domain.suite(args.n, args.seed)
-    out = OUT / args.out
-    out.mkdir(parents=True, exist_ok=True)
-    started = time.time()
-    suite.evaluate(model=config)
-    record = {
-        "bench": args.bench,
-        "pattern": pattern,
-        "model": args.model,
-        "n": args.n,
-        "seed": args.seed,
-        "overall": suite.overall_score,
-        "llm_calls": config.llm.calls,
-        "failures": config.failures,
-        "errors": config.errors[:5],
-        "usage": asdict(backend.usage),
-        "seconds": round(time.time() - started, 1),
-        "items": suite.predictions.to_dict("records"),
-    }
-    path = out / f"{args.bench}-{pattern}-{slug(args.model)}.json"
-    path.write_text(json.dumps(record, ensure_ascii=False, indent=1, default=str))
-    return (
-        f"{pattern:>14}: score {suite.overall_score:.2f}, "
-        f"{config.llm.calls} llm calls, {record['seconds']}s -> {path.name}"
-    )
+    raise NotImplementedError
 
 
 def main() -> None:

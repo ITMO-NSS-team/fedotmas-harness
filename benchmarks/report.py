@@ -1,31 +1,19 @@
 """Assemble the results table from recorded runs.
 
-Single run (default): one dir → fixed patterns, random, both oracles, and with --selector
-the live per-task selector row, scored by lookup into that dir's records.
-
-    uv run --group examples --group bench python benchmarks/report.py --bench gsm8k
-
-Aggregate (--runs GLOB): several run dirs of the same (bench, model) → per-cell mean ± std,
-plus a stable per-task oracle (a task counts only for the fraction of runs some pattern got
-it right), which deflates the single-run luck that inflates the per-run oracle.
-
-    uv run --group examples --group bench python benchmarks/report.py \
-        --bench gsm8k --model openrouter:mistralai/ministral-8b-2512 \
-        --runs '.out_gsm8k_gpt4omini-*'
+Usage:
+uv run --group examples --group bench python benchmarks/report.py \
+    --bench gsm8k --model openrouter:mistralai/ministral-8b-2512 \
+    --runs '.out_gsm8k_gpt4omini-*'
 """
 
 from __future__ import annotations
 
 import argparse
-import asyncio
 import importlib
 import json
-from collections import Counter
 from pathlib import Path
 from statistics import mean, stdev
 from typing import TYPE_CHECKING
-
-from dotenv import load_dotenv
 
 if TYPE_CHECKING:
     from fedotmas_llm import LLM
@@ -191,31 +179,7 @@ async def select_on_specs(task: str, specs: dict[str, SystemSpec], llm: LLM) -> 
 def selector_row(
     m: dict, model: str, fills: dict
 ) -> tuple[str, float, float, float | None]:
-    from fedotmas_llm.adapters.pydantic_ai import PydanticAI
-    from presets import spec
-
-    load_dotenv(Path(__file__).parents[1] / ".env")
-    llm = PydanticAI(model)
-    correct, tasks, calls, tokens = m["correct"], m["tasks"], m["calls"], m["tok"]
-    # menu is each recorded pattern's full spec; labels stay names so the lookup resolves
-    specs = {p: spec(p, fills) for p in correct}
-
-    async def pick_all() -> list[str]:
-        picks = await asyncio.gather(*(select_on_specs(t, specs, llm) for t in tasks))
-        return list(picks)
-
-    picks = asyncio.run(pick_all())
-    print(f"selector picks: {dict(Counter(picks))}")
-    acc = sum(correct[p][t] for p, t in zip(picks, tasks)) / len(tasks)
-    cost = sum(calls[p] for p in picks) / len(tasks) + 1  # +1 for the selection call
-    picked = [tokens[p] for p in picks]
-    select_tok = (llm.usage.input_tokens + llm.usage.output_tokens) / len(tasks)
-    tok = (
-        sum(t for t in picked if t is not None) / len(tasks) + select_tok
-        if all(t is not None for t in picked)
-        else None
-    )
-    return ("selector (per-task)", acc, cost, tok)
+    raise NotImplementedError
 
 
 def main() -> None:

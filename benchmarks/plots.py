@@ -1,9 +1,3 @@
-"""Article figures from the recorded runs. Three plots, one message each:
-headroom-vs-difficulty (the law), accuracy-vs-cost (single is Pareto), selector-vs-baselines.
-
-    uv run --group examples --group bench python benchmarks/plots.py
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
