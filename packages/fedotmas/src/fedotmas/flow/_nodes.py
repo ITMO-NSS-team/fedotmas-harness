@@ -30,14 +30,32 @@ class Ctx:
         return build_id(hint, self.n)
 
 
+def _waves(view: View, srcs: list[str], emitted: int) -> list[list[Any]]:
+    """The version-aligned waves not yet emitted: wave k pairs the k-th version of every
+    source, so a join over a re-entered system never mixes generations. Positional identity
+    holds because fire-once-per-distinct-input gives every arm one version per pass."""
+    versions = [view.query(s) for s in srcs]
+    ready = min(len(v) for v in versions)
+    return [[v[k].value for v in versions] for k in range(emitted, ready)]
+
+
+def _wave_trigger(srcs: list[str], out: str) -> Callable[[View], bool]:
+    """Armed only when every source holds a version the output has not consumed yet."""
+    return lambda view: all(view.count(s) > view.count(out) for s in srcs)
+
+
 def _collect_node(name: str, srcs: list[str], out: str) -> Node:
     async def invoke(input: Any, view: View) -> Result:
-        return Result(writes=[Fact(tag=out, value=[view.value(s) for s in srcs])])
+        emitted = view.count(out)
+        return Result(
+            writes=[Fact(tag=out, value=w) for w in _waves(view, srcs, emitted)]
+        )
 
     return as_node(
         invoke,
         name=name,
         reads=" ".join(srcs),
+        trigger=_wave_trigger(srcs, out),
         kind=Kind.GATHER,
         params={"srcs": srcs},
     )
@@ -57,19 +75,20 @@ def _into_node(name: str, state_src: str, reply_src: str, key: str) -> Node:
     through unchanged."""
 
     async def invoke(input: Any, view: View) -> Result:
-        state = view.value(state_src)
-        if not isinstance(state, dict):
-            raise TypeError(
-                f"{name!r}: .into() threads a dict state, got {type(state).__name__}"
-            )
-        return Result(
-            writes=[Fact(tag=name, value={**state, key: view.value(reply_src)})]
-        )
+        writes = []
+        for state, reply in _waves(view, [state_src, reply_src], view.count(name)):
+            if not isinstance(state, dict):
+                raise TypeError(
+                    f"{name!r}: .into() threads a dict state, got {type(state).__name__}"
+                )
+            writes.append(Fact(tag=name, value={**state, key: reply}))
+        return Result(writes=writes)
 
     return as_node(
         invoke,
         name=name,
         reads=f"{state_src} {reply_src}",
+        trigger=_wave_trigger([state_src, reply_src], name),
         kind=Kind.INTO,
         params={"key": key, "state": state_src, "reply": reply_src},
     )
@@ -80,20 +99,22 @@ def _merge_node(name: str, state_src: str, reply_src: str) -> Node:
     (a BaseModel reply is dumped first)."""
 
     async def invoke(input: Any, view: View) -> Result:
-        state = view.value(state_src)
-        reply = view.value(reply_src)
-        patch = reply.model_dump() if isinstance(reply, BaseModel) else reply
-        if not isinstance(state, dict) or not isinstance(patch, dict):
-            raise TypeError(
-                f"{name!r}: .merge() needs a dict state and a structured reply, got "
-                f"{type(state).__name__} and {type(reply).__name__}"
-            )
-        return Result(writes=[Fact(tag=name, value={**state, **patch})])
+        writes = []
+        for state, reply in _waves(view, [state_src, reply_src], view.count(name)):
+            patch = reply.model_dump() if isinstance(reply, BaseModel) else reply
+            if not isinstance(state, dict) or not isinstance(patch, dict):
+                raise TypeError(
+                    f"{name!r}: .merge() needs a dict state and a structured reply, got "
+                    f"{type(state).__name__} and {type(reply).__name__}"
+                )
+            writes.append(Fact(tag=name, value={**state, **patch}))
+        return Result(writes=writes)
 
     return as_node(
         invoke,
         name=name,
         reads=f"{state_src} {reply_src}",
+        trigger=_wave_trigger([state_src, reply_src], name),
         kind=Kind.MERGE,
         params={"state": state_src, "reply": reply_src},
     )

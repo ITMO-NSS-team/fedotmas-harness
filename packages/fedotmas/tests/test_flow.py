@@ -244,11 +244,6 @@ async def test_nest_budget_caps_a_non_quiescing_inner_board():
     assert "stopped (terminate)" in run.errors[0].value
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="joins are not wave-aligned: a second wave over unequal branch lengths "
-    "emits a mixed list; needs an epoch notion",
-)
 async def test_join_waves_do_not_mix_across_unequal_branches():
     slow = action(echo, name="s1") + action(echo, name="s2")
     system = gather(action(double), slow).system(entry="in", out="out")
@@ -265,3 +260,67 @@ async def test_join_waves_do_not_mix_across_unequal_branches():
             fed = True
     outs = [f.value for f in store.snapshot().query("out")]
     assert outs == [[2, 1], [20, 10]]
+
+
+async def _second_wave(system, first, second):
+    """Seed `first`, commit `second` into the same store once output appears, collect outs."""
+    store = Store()
+    fed = False
+    async for _ in ReactiveExecutor().stream(
+        system,
+        store,
+        seed=[Fact(tag="in", value=first)],
+        terminate=Goal(lambda v: v.count("out") >= 2),
+    ):
+        if not fed and store.snapshot().exists("out"):
+            store.commit([Fact(tag="in", value=second, producer="feeder", step=99)])
+            fed = True
+    return [f.value for f in store.snapshot().query("out")]
+
+
+async def test_into_pairs_state_with_the_reply_of_its_own_wave():
+    """Re-entry: a fresh state version must wait for its reply, not pair with the stale one."""
+
+    async def shout(s, view):
+        return s["topic"].upper()
+
+    system = action(shout).into("reply").system(entry="in", out="out")
+    waves = await _second_wave(system, {"topic": "a"}, {"topic": "b"})
+    assert waves == [{"topic": "a", "reply": "A"}, {"topic": "b", "reply": "B"}]
+
+
+async def test_merge_pairs_state_with_the_reply_of_its_own_wave():
+    async def classify(s, view):
+        return {"label": s["text"].upper()}
+
+    system = action(classify).merge().system(entry="in", out="out")
+    waves = await _second_wave(system, {"text": "a"}, {"text": "b"})
+    assert waves == [{"text": "a", "label": "A"}, {"text": "b", "label": "B"}]
+
+
+async def test_nest_wraps_a_mutually_recursive_board_as_one_node():
+    """A bid/ask cycle the arrow surface cannot spell converges inside one typed step; the
+    outer flow stays a straight arrow."""
+
+    async def buy(ask, view):
+        return round(min((view.value("bid") or 50) * 1.2, ask), 1)
+
+    async def sell(bid, view):
+        return round(max(bid, view.value("ask") * 0.9), 1)
+
+    async def close(_, view):
+        return {"price": view.value("bid"), "rounds": view.count("bid")}
+
+    haggle = blackboard(
+        Rule("buyer", buy, reads="ask", writes="bid", when=["ask"]),
+        Rule("seller", sell, reads="bid", writes="ask", when=["bid"]),
+        Rule(
+            "referee",
+            close,
+            writes="deal",
+            when=lambda v: v.exists("bid") and v.value("bid") >= v.value("ask"),
+        ),
+    )
+    out = await nest(haggle, entry="ask", out="deal", budget=30).run(100.0)
+    assert out.ok
+    assert out.value == {"price": 81.0, "rounds": 3}

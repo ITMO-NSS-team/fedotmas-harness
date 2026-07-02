@@ -1,16 +1,10 @@
 # Roadmap
 
-## Now (v0.1)
-- wave epochs for joins
-- checkpoint-style resume and persistence
-- system serialize module
-- LLM capabilities: tools (MCP), file/URI reads, agent-to-agent calls, bound by reference. serving: a manifest over HTTP/SSE; a system as an MCP tool or A2A agent
-- meta-agent sgr for building MAS
-
-## Next (v0.2)
+## Next
 - reliability: a middleware seam plus retry and fallback combinators
-- meta-agent: manifest generation and system composition (selection already ships)
+- meta-agent: selection/generation/combination
+- LLM capabilities: tools (MCP), file/URI reads, agent-to-agent calls, bound by reference. serving: a manifest over HTTP/SSE; a system as an MCP tool or A2A agent
 
 ## Later
 - knowledge-graph runtime memory behind a store port
-- a fine-tuned meta-agent shipped with the framework
+-

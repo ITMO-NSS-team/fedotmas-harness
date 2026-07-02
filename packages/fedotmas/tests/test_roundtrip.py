@@ -124,3 +124,38 @@ def test_callable_until_is_named_error():
     system = action(bump).loop(until=lambda s: s["done"]).system(entry="in", out="out")
     with pytest.raises(ReconstructError):
         from_blueprint(to_blueprint(system), Deps(bodies={"bump": bump}))
+
+
+async def test_roundtrip_loop_over_branch_with_a_nested_loop():
+    """Deep nonlinearity stays declarative: a loop over a branch whose one case is itself a
+    loop (a solver that rewrites its own route key to escalate) rebuilds and runs the same."""
+
+    async def fast_step(s):
+        tries = s["tries"] + 1
+        mode = "careful" if tries >= 2 else "fast"
+        return {**s, "tries": tries, "mode": mode, "solved": s["n"] <= 2}
+
+    async def careful_step(s):
+        sub = s["sub"] + 1
+        return {**s, "sub": sub, "sub_done": sub >= s["n"], "solved": sub >= s["n"]}
+
+    flow = branch(
+        "mode",
+        {
+            "fast": action(fast_step),
+            "careful": action(careful_step).loop(until="sub_done"),
+        },
+    ).loop(until="solved")
+    system = flow.system(entry="in", out="out")
+
+    bp = to_blueprint(system)
+    outer = next(n for n in bp.nodes if n.kind == "loop.iter")
+    assert outer.inner is not None
+    assert any(n.kind == "loop.iter" for n in outer.inner.nodes)
+
+    rebuilt = from_blueprint(
+        bp, Deps(bodies={"fast_step": fast_step, "careful_step": careful_step})
+    )
+    assert to_blueprint(rebuilt) == bp
+    v = {"n": 4, "tries": 0, "sub": 0, "mode": "fast", "solved": False}
+    assert await _out(rebuilt, "in", v, "out") == await _out(system, "in", v, "out")

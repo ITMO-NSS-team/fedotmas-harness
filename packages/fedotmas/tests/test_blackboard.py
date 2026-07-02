@@ -136,3 +136,39 @@ def test_rule_validation(rule):
 def test_duplicate_rule_names_rejected():
     with pytest.raises(ValueError, match="duplicate rule names"):
         blackboard(Rule("r", fn=bump, writes="a"), Rule("r", fn=bump, writes="b"))
+
+
+async def test_back_edge_rule_re_runs_the_pipeline_to_the_goal():
+    """A rule appending a NEW version of the entry fact runs the chain again as a next wave;
+    the append-only log doubles as the attempt history the worker reads its effort off."""
+
+    async def work(task, view):
+        return view.count("task")
+
+    async def resubmit(draft, view):
+        return draft
+
+    async def accept(draft, view):
+        return draft
+
+    board = blackboard(
+        Rule("work", fn=work, reads="task", writes="draft", when=["task"]),
+        Rule(
+            "resubmit",
+            fn=resubmit,
+            reads="draft",
+            writes="task",
+            when=lambda v: v.exists("draft") and v.value("draft") < 3,
+        ),
+        Rule(
+            "accept",
+            fn=accept,
+            reads="draft",
+            writes="done",
+            when=lambda v: v.exists("draft") and v.value("draft") >= 3,
+        ),
+    )
+    out = await board.run({"task": 0}, goal="done")
+    assert out.ok
+    assert out.value == 3
+    assert out.view.count("task") == 3
