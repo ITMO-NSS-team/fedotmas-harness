@@ -15,11 +15,9 @@ _BoundFn = Callable[[Any, View], Awaitable[Any]]
 
 @dataclass
 class PromptRule(Rule):
-    """A blackboard rule whose body is a prompt over the LLM seam, the reactive counterpart to
-    fedotmas.Rule's code body and the same minimal pair as agent to action. `prompt` is the
-    static system prompt; `input` is an optional template for what the model sees, rendered over
-    the read fact; `returns` its output type. It binds its backend via `llm` here or the
-    run-scoped `bind={"llm": ...}`; reads/writes/when/meta behave exactly as on a code Rule.
+    """A blackboard rule whose body is a prompt over the LLM seam.
+    It binds its backend via `llm` here or the run-scoped `bind={"llm": ...}`;
+    reads/writes/when/meta behave exactly as on a code Rule.
 
     Example:
         draft = PromptRule(name="draft", reads="topic", writes="draft", prompt="Draft it.")

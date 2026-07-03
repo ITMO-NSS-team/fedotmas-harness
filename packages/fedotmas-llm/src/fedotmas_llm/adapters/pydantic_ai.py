@@ -31,9 +31,7 @@ def _split(tools: tuple[Any, ...]) -> tuple[list[Tool], list[Any]]:
 
 
 class PydanticAI:
-    """An LLM backend over pydantic-ai Agent. The model client is inferred once on first use and
-    reused across calls; each call builds a lightweight Agent for the node's prompt, output type,
-    and tools, and accumulates token usage into one running total."""
+    """An LLM backend over pydantic-ai Agent."""
 
     def __init__(self, model: str, **settings: Any) -> None:
         self._model = model

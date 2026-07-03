@@ -14,8 +14,7 @@ B = TypeVar("B")
 
 class _LLMAtom(Flow[Any, Any]):
     """A leaf whose body is a prompt over the LLM seam. The backend binds per node or falls
-    back to the run-scoped "llm" binding (``bind={"llm": ...}``); binding neither is a
-    compile-time error."""
+    back to the run-scoped "llm" binding (``bind={"llm": ...}``)."""
 
     def __init__(
         self,
@@ -100,21 +99,11 @@ def agent(
     llm: LLM | None = None,
     tools: list[Tool] | None = None,
 ) -> Flow[Any, Any]:
-    """Lift a prompt into an LLM agent: a Flow atom whose body is data, not code. Always a
-    model call; the deterministic counterpart is fedotmas.action.
+    """Lift a prompt into an LLM agent: a Flow atom whose body is data, not code.
+    The deterministic counterpart is fedotmas.action.
 
-    `prompt` is the static system prompt. `input` is an optional template for what the model
-    sees, rendered over the node's input (dict keys or model fields, store tags as fallback,
-    `{input}` for the whole value); without it the input is passed through unchanged. Declare
-    takes/returns to type the boundary; a structured backend produces the `returns` type
-    directly. `labels` makes the agent a classifier: the output is one label from the set,
-    constrained at the backend via a Literal and validated regardless, the shape that drives
-    branch when the route is the model's choice. To thread a dict state, compose the result:
-    `agent(..., takes=dict, returns=...).into("key")` puts the reply under one key, `.merge()`
-    folds a structured reply's fields in. `tools` are the tools the model may call, a mix of
-    FunctionTool (a local callable) and MCPTool (a server url); they reach the backend only
-    when present, so declaring tools requires a backend that accepts them. The backend binds
-    via `llm` here or the run-scoped `bind={"llm": ...}`; neither bound fails at compile time.
+    The backend binds via `llm` here or the run-scoped `bind={"llm": ...}`;
+    neither bound fails at compile time.
 
     Example:
         draft = agent("draft", prompt="Write a haiku about {topic}.")
