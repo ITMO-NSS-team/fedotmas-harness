@@ -23,6 +23,10 @@ examples = [
   "pydantic-ai-slim[openai]>=1.106",
   "python-dotenv>=1.2.2",
 ]
+web = [
+  "fastapi>=0.137.2",
+  "uvicorn>=0.49",
+]
 
 [tool.uv]
 workspace.members = [ "packages/*" ]
