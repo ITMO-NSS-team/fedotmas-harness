@@ -18,7 +18,9 @@ classifiers = [
 ]
 dependencies = [
   "fedotmas",
+  "fedotmas-llm",
 ]
 
 [tool.uv]
 sources.fedotmas = { workspace = true }
+sources.fedotmas-llm = { workspace = true }
