@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from fedotmas_llm import LLM
-    from fedotmas_meta import SystemSpec
+    from fedotmas_meta.spec import SystemSpec
 
 OUT = Path(__file__).parent / "out"
 ORDER = (

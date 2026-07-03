@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from fedotmas.serialize import to_blueprint
 from fedotmas_llm import Call
-from fedotmas_meta import MENU, Recipe, Review, cell_for, compile_recipe
+from fedotmas_meta import MENU, Recipe, Review, cell_for, compile_recipe, menu_card
 
 FILLS = {
     "single": {"agent": "solve"},
@@ -94,3 +94,16 @@ def test_no_lattice_point_is_ambiguous():
 def test_off_menu_recipe_names_the_menu():
     with pytest.raises(LookupError, match="no menu cell"):
         cell_for(Recipe(decompose="master", verify="judge"))
+
+
+def test_cell_for_takes_a_caller_menu():
+    menu = {"single": MENU["single"], "chain": MENU["chain"]}
+    assert cell_for(Recipe(decompose="pipeline"), menu).name == "chain"
+    with pytest.raises(LookupError):
+        cell_for(Recipe(width=3), menu)
+
+
+def test_menu_card_shows_coordinates_not_names():
+    card = menu_card()
+    assert len(card.splitlines()) == 9
+    assert "single" not in card and "orchestrator" not in card

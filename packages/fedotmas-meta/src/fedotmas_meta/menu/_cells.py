@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -11,7 +12,7 @@ from fedotmas import Flow, action, blackboard, gather, nest
 from fedotmas_llm import PromptRule, agent
 from pydantic import BaseModel
 
-from fedotmas_meta._recipe import AXES, Recipe
+from fedotmas_meta.menu._recipe import AXES, Recipe
 
 Fill = Mapping[str, Any]
 
@@ -258,17 +259,34 @@ def _matches(recipe: Recipe, cell: Cell) -> bool:
     return True
 
 
-def cell_for(recipe: Recipe) -> Cell:
+def cell_for(recipe: Recipe, menu: Mapping[str, Cell] = MENU) -> Cell:
     """The unique menu cell whose fixed axes match the recipe; knob axes stay free."""
-    hits = [c for c in MENU.values() if _matches(recipe, c)]
+    hits = [c for c in menu.values() if _matches(recipe, c)]
     if len(hits) == 1:
         return hits[0]
     coords = recipe.model_dump()
     if hits:
         raise LookupError(f"recipe {coords} matches {[c.name for c in hits]}")
-    raise LookupError(f"no menu cell for recipe {coords}; menu: {sorted(MENU)}")
+    raise LookupError(f"no menu cell for recipe {coords}; menu: {sorted(menu)}")
 
 
-def compile_recipe(recipe: Recipe, fill: Fill) -> Flow[Any, Any]:
+def compile_recipe(
+    recipe: Recipe, fill: Fill, menu: Mapping[str, Cell] = MENU
+) -> Flow[Any, Any]:
     """Build the runnable Flow for a recipe: menu lookup plus knob substitution."""
-    return cell_for(recipe).build(fill, recipe)
+    return cell_for(recipe, menu).build(fill, recipe)
+
+
+def resolve(recipe: Recipe, menu: Mapping[str, Cell] = MENU) -> Cell:
+    """The menu cell for a recipe, falling back to single for off-menu points."""
+    try:
+        return cell_for(recipe, menu)
+    except LookupError:
+        return menu["single"]
+
+
+def menu_card(menu: Mapping[str, Cell] = MENU) -> str:
+    """The menu as selector input: one line per cell, coordinates and hint, no names."""
+    return "\n".join(
+        f"- {json.dumps(c.recipe.model_dump())}  {c.hint}" for c in menu.values()
+    )

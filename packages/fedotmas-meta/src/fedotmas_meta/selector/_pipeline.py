@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import json
-from collections.abc import Mapping
 from typing import Any
 
 from fedotmas import Flow, action
 from fedotmas_llm import agent
 
-from fedotmas_meta._menu import MENU, Cell, Fill, cell_for
-from fedotmas_meta._recipe import Recipe
+from fedotmas_meta.menu import Recipe, menu_card, resolve
+from fedotmas_meta.selector._fills import Fills
 
 PROMPT = (
     "You pick the coordination structure a task will be solved with, before any solving "
@@ -16,21 +14,6 @@ PROMPT = (
     "recipe coordinates of the structure to run. Coordination multiplies token cost, so "
     "buy structure only where the executor would likely fail alone."
 )
-
-
-def menu_card() -> str:
-    """The menu as selector input: one line per cell, coordinates and hint, no names."""
-    return "\n".join(
-        f"- {json.dumps(c.recipe.model_dump())}  {c.hint}" for c in MENU.values()
-    )
-
-
-def resolve(recipe: Recipe) -> Cell:
-    """The menu cell for a recipe, falling back to single for off-menu points."""
-    try:
-        return cell_for(recipe)
-    except LookupError:
-        return MENU["single"]
 
 
 def _intake(card: str) -> Flow[str, dict]:
@@ -57,22 +40,24 @@ def emit_recipe(selector: Any, card: str) -> Flow[str, Recipe]:
     return _intake(card) + _picker(selector)
 
 
-def select_pipeline(
+def pipeline(
     *,
     selector: Any,
     executor: Any,
-    fills: Mapping[str, Fill],
+    fills: Fills,
     card: str = "a small language model",
     budget: int = 60,
 ) -> Flow[str, str]:
-    """Emit a recipe, compile it from the menu, run the built system on the executor."""
+    """Emit a recipe, source the fill, compile from the menu, run on the executor."""
 
     @action
     async def execute(state: dict) -> str:
         recipe: Recipe = state["recipe"]
         cell = resolve(recipe)
-        flow = cell.build(fills[cell.name], recipe)
-        out = await flow.run(state["task"], bind={"llm": executor}, budget=budget)
+        fill = await fills(cell, state["task"])
+        out = await cell.build(fill, recipe).run(
+            state["task"], bind={"llm": executor}, budget=budget
+        )
         if not out.ok:
             raise RuntimeError(f"cell {cell.name!r} failed: {out.reason}")
         return out.value
