@@ -1,5 +1,7 @@
 import { createDefine } from "fresh";
 
-export type State = Record<string, never>;
+export interface State {
+  session: string;
+}
 
 export const define = createDefine<State>();

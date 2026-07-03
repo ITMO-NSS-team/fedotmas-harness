@@ -10,4 +10,8 @@ _fresh/
 # npm + other dependencies
 node_modules/
 vendor/
+# Deno KV local SQLite database
+*.sqlite3
+*.sqlite3-journal
+deno_kv/
 
