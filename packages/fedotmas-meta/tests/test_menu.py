@@ -6,7 +6,15 @@ from typing import Any
 import pytest
 from fedotmas.serialize import to_blueprint
 from fedotmas_llm import Call
-from fedotmas_meta import MENU, Recipe, Review, cell_for, compile_recipe, menu_card
+from fedotmas_meta import (
+    MENU,
+    Recipe,
+    Review,
+    cell_for,
+    compile_recipe,
+    menu_card,
+    resolve,
+)
 
 FILLS = {
     "single": {"agent": "solve"},
@@ -107,3 +115,47 @@ def test_menu_card_shows_coordinates_not_names():
     card = menu_card()
     assert len(card.splitlines()) == 9
     assert "single" not in card and "orchestrator" not in card
+
+
+def test_near_canonical_recipes_resolve_by_fixed_axes():
+    assert resolve(Recipe(verify="judge")).name == "debate"
+    assert resolve(Recipe(iterate=0, verify="critic")).name == "eval_optimizer"
+    assert resolve(Recipe(decompose="master", verify="judge")).name == "single"
+
+
+def test_resolve_without_single_fallback_raises():
+    menu = {"chain": MENU["chain"]}
+    with pytest.raises(LookupError, match="no 'single' fallback"):
+        resolve(Recipe(decompose="master", verify="judge"), menu)
+
+
+class CountingLLM(StubLLM):
+    def __init__(self, approve: bool = True) -> None:
+        self.calls = 0
+        self.approve = approve
+
+    async def complete(self, call: Call, view: Any) -> Any:
+        self.calls += 1
+        if call.returns is Review:
+            return Review(approved=self.approve, feedback="again")
+        return await super().complete(call, view)
+
+
+async def test_debate_width_sets_the_solver_count():
+    for width, calls in ((2, 3), (4, 5)):
+        llm = CountingLLM()
+        flow = compile_recipe(Recipe(width=width, verify="judge"), FILLS["debate"])
+        run = await flow.run("what is 2 + 2?", bind={"llm": llm}, budget=30)
+        assert run.ok
+        assert llm.calls == calls
+
+
+async def test_iterate_caps_the_revision_rounds():
+    for iterate, calls in ((1, 4), (3, 8)):
+        llm = CountingLLM(approve=False)
+        flow = compile_recipe(
+            Recipe(iterate=iterate, verify="critic"), FILLS["eval_optimizer"]
+        )
+        run = await flow.run("what is 2 + 2?", bind={"llm": llm}, budget=60)
+        assert run.ok, (run.reason, run.errors)
+        assert llm.calls == calls

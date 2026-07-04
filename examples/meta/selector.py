@@ -6,9 +6,6 @@ from fedotmas_llm import Call
 from fedotmas_meta import Recipe, Review
 from fedotmas_meta.selector import drafted, frozen, pipeline
 
-# Stubs stand in for the three models; swap for real backends, e.g.
-# fedotmas_llm.adapters.pydantic_ai.PydanticAI("openai-responses:gpt-4o-mini").
-
 
 class StubSelector:
     """The small trained model: task in, recipe coordinates out."""

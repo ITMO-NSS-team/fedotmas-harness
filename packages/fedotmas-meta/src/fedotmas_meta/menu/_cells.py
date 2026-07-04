@@ -8,7 +8,7 @@ from functools import reduce
 from operator import add
 from typing import Any
 
-from fedotmas import Flow, action, blackboard, gather, nest
+from fedotmas import Condition, Flow, action, blackboard, gather, nest
 from fedotmas_llm import PromptRule, agent
 from pydantic import BaseModel
 
@@ -24,7 +24,12 @@ class Review(BaseModel):
 
 @action
 async def to_state(task: str) -> dict:
-    return {"task": task, "draft": "", "feedback": ""}
+    return {"task": task, "draft": "", "feedback": "", "round": 0}
+
+
+@action
+async def bump(state: dict) -> dict:
+    return {**state, "round": state["round"] + 1}
 
 
 @action
@@ -41,7 +46,9 @@ def _seq(prompts: Mapping[str, str]) -> Flow[Any, Any]:
     return reduce(add, [agent(n, prompt=p) for n, p in prompts.items()])
 
 
-def _revise_loop(drafting: Flow[Any, Any], critic_prompt: str) -> Flow[Any, Any]:
+def _revise_loop(
+    drafting: Flow[Any, Any], critic_prompt: str, rounds: int
+) -> Flow[Any, Any]:
     critic = agent(
         "critic",
         prompt=critic_prompt,
@@ -49,8 +56,9 @@ def _revise_loop(drafting: Flow[Any, Any], critic_prompt: str) -> Flow[Any, Any]
         takes=dict,
         returns=Review,
     )
-    rounds = (drafting.into("draft") + critic.merge()).loop(until="approved")
-    return to_state + rounds + take_draft
+    done = Condition(key="approved") | Condition(key="round", op="gte", value=rounds)
+    body = drafting.into("draft") + critic.merge() + bump
+    return to_state + body.loop(until=done) + take_draft
 
 
 def _single(fill: Fill, r: Recipe) -> Flow[Any, Any]:
@@ -62,7 +70,12 @@ def _chain(fill: Fill, r: Recipe) -> Flow[Any, Any]:
 
 
 def _debate(fill: Fill, r: Recipe) -> Flow[Any, Any]:
-    solvers = [agent(n, prompt=p) for n, p in fill["debaters"].items()]
+    pairs = list(fill["debaters"].items())
+    seats = [pairs[i % len(pairs)] for i in range(max(r.width, 2))]
+    solvers = [
+        agent(n if i < len(pairs) else f"{n}_{i}", prompt=p)
+        for i, (n, p) in enumerate(seats)
+    ]
     judge = agent("judge", prompt=fill["judge"], takes=list, returns=str)
     return gather(*solvers) + judge
 
@@ -80,7 +93,7 @@ def _eval_optimizer(fill: Fill, r: Recipe) -> Flow[Any, Any]:
         takes=dict,
         returns=str,
     )
-    return _revise_loop(generator, fill["critic"])
+    return _revise_loop(generator, fill["critic"], r.iterate + 1)
 
 
 def _chain_critic(fill: Fill, r: Recipe) -> Flow[Any, Any]:
@@ -93,7 +106,7 @@ def _chain_critic(fill: Fill, r: Recipe) -> Flow[Any, Any]:
         returns=str,
     )
     rest = [agent(n, prompt=fill["steps"][n]) for n in names[1:]]
-    return _revise_loop(reduce(add, [head, *rest]), fill["critic"])
+    return _revise_loop(reduce(add, [head, *rest]), fill["critic"], r.iterate + 1)
 
 
 def _orchestrator(fill: Fill, r: Recipe) -> Flow[Any, Any]:
@@ -170,6 +183,7 @@ class Cell:
     build: Callable[[Fill, Recipe], Flow[Any, Any]]
     knobs: frozenset[str] = frozenset()
     roles: tuple[str, ...] = ()
+    many: frozenset[str] = frozenset()
 
 
 MENU: dict[str, Cell] = {
@@ -188,6 +202,7 @@ MENU: dict[str, Cell] = {
             Recipe(decompose="pipeline"),
             _chain,
             roles=("steps",),
+            many=frozenset({"steps"}),
         ),
         Cell(
             "debate",
@@ -196,6 +211,7 @@ MENU: dict[str, Cell] = {
             _debate,
             knobs=frozenset({"width"}),
             roles=("debaters", "judge"),
+            many=frozenset({"debaters"}),
         ),
         Cell(
             "eval_optimizer",
@@ -211,6 +227,7 @@ MENU: dict[str, Cell] = {
             Recipe(decompose="master"),
             _orchestrator,
             roles=("planner", "workers", "synthesizer"),
+            many=frozenset({"workers"}),
         ),
         Cell(
             "blackboard",
@@ -225,6 +242,7 @@ MENU: dict[str, Cell] = {
             Recipe(decompose="master", cooperate="shared"),
             _orchestrator_blackboard,
             roles=("planner", "workers", "skeptic", "synthesizer"),
+            many=frozenset({"workers"}),
         ),
         Cell(
             "chain_critic",
@@ -233,6 +251,7 @@ MENU: dict[str, Cell] = {
             _chain_critic,
             knobs=frozenset({"iterate"}),
             roles=("steps", "critic"),
+            many=frozenset({"steps"}),
         ),
         Cell(
             "self_consistency",
@@ -277,12 +296,29 @@ def compile_recipe(
     return cell_for(recipe, menu).build(fill, recipe)
 
 
+def _matches_fixed(recipe: Recipe, cell: Cell) -> bool:
+    return all(
+        getattr(recipe, a) == getattr(cell.recipe, a)
+        for a in AXES
+        if a not in cell.knobs
+    )
+
+
 def resolve(recipe: Recipe, menu: Mapping[str, Cell] = MENU) -> Cell:
-    """The menu cell for a recipe, falling back to single for off-menu points."""
+    """The menu cell for a recipe: exact match, else the unique cell whose fixed axes
+    match (knobs left at default read as unspecified), else single."""
     try:
         return cell_for(recipe, menu)
     except LookupError:
-        return menu["single"]
+        hits = [c for c in menu.values() if _matches_fixed(recipe, c)]
+        if len(hits) == 1:
+            return hits[0]
+        if "single" in menu:
+            return menu["single"]
+        raise LookupError(
+            f"recipe {recipe.model_dump()} is off-menu and the menu has no 'single' "
+            f"fallback; menu: {sorted(menu)}"
+        ) from None
 
 
 def menu_card(menu: Mapping[str, Cell] = MENU) -> str:

@@ -76,10 +76,14 @@ async def test_off_menu_recipe_falls_back_to_single():
 
 
 def test_fill_schema_mirrors_the_cell_roles():
-    fields = fill_schema(MENU["orchestrator"]).model_fields
+    schema = fill_schema(MENU["orchestrator"])
+    fields = schema.model_fields
     assert set(fields) == {"planner", "workers", "synthesizer"}
     assert fields["planner"].annotation is str
-    assert fields["workers"].annotation == dict[str, str]
+    fill = schema(
+        planner="p", workers={"extract": "e", "compute": "c"}, synthesizer="s"
+    )
+    assert fill.model_dump()["workers"] == {"extract": "e", "compute": "c"}
 
 
 def test_fill_schema_bounds_mapping_roles():
@@ -88,11 +92,46 @@ def test_fill_schema_bounds_mapping_roles():
         schema(steps={"only": "one step"})
 
 
+def test_fill_schema_rejects_unsafe_sub_agent_names():
+    schema = fill_schema(MENU["chain"])
+    with pytest.raises(ValidationError):
+        schema(steps={"data extraction": "e", "solve": "s"})
+
+
+def test_fill_schema_rejects_names_shadowing_roles():
+    schema = fill_schema(MENU["orchestrator_blackboard"])
+    with pytest.raises(ValidationError, match="shadow"):
+        schema(
+            planner="p",
+            workers={"skeptic": "e", "compute": "c"},
+            skeptic="k",
+            synthesizer="s",
+        )
+
+
+async def test_frozen_names_the_missing_cell():
+    with pytest.raises(LookupError, match="no frozen fill for cell 'debate'"):
+        await frozen(FILLS)(MENU["debate"], "task")
+
+
 async def test_drafted_source_fills_the_cell_roles():
     cell = MENU["debate"]
     fill = await drafted(StubAssembler())(cell, "what is 2 + 2?")
     assert set(fill) == set(cell.roles)
     assert list(fill["debaters"]) == ["first", "second"]
+
+
+async def test_pipeline_takes_a_caller_menu():
+    menu = {"single": MENU["single"]}
+    flow = pipeline(
+        selector=StubSelector(Recipe(cooperate="shared")),
+        executor=StubExecutor(),
+        fills=frozen(FILLS),
+        menu=menu,
+    )
+    run = await flow.run("what is 2 + 2?")
+    assert run.ok
+    assert run.value.startswith("[solve]")
 
 
 @pytest.mark.parametrize("name", sorted(MENU))

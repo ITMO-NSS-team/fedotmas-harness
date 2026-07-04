@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
-from fedotmas import Flow, action
+from fedotmas import Flow, RunError, action
 from fedotmas_llm import agent
 
-from fedotmas_meta.menu import Recipe, menu_card, resolve
+from fedotmas_meta.menu import MENU, Cell, Recipe, menu_card, resolve
 from fedotmas_meta.selector._fills import Fills
 
 PROMPT = (
@@ -16,10 +17,12 @@ PROMPT = (
 )
 
 
-def _intake(card: str) -> Flow[str, dict]:
+def _intake(card: str, menu: Mapping[str, Cell]) -> Flow[str, dict]:
+    lines = menu_card(menu)
+
     @action
     async def prepare(task: str) -> dict:
-        return {"task": task, "executor": card, "menu": menu_card()}
+        return {"task": task, "executor": card, "menu": lines}
 
     return prepare
 
@@ -35,9 +38,11 @@ def _picker(selector: Any) -> Flow[dict, Recipe]:
     )
 
 
-def emit_recipe(selector: Any, card: str) -> Flow[str, Recipe]:
+def emit_recipe(
+    selector: Any, card: str, menu: Mapping[str, Cell] = MENU
+) -> Flow[str, Recipe]:
     """Emission alone: task in, Recipe out."""
-    return _intake(card) + _picker(selector)
+    return _intake(card, menu) + _picker(selector)
 
 
 def pipeline(
@@ -47,19 +52,21 @@ def pipeline(
     fills: Fills,
     card: str = "a small language model",
     budget: int = 60,
+    menu: Mapping[str, Cell] = MENU,
 ) -> Flow[str, str]:
     """Emit a recipe, source the fill, compile from the menu, run on the executor."""
 
     @action
     async def execute(state: dict) -> str:
         recipe: Recipe = state["recipe"]
-        cell = resolve(recipe)
+        cell = resolve(recipe, menu)
         fill = await fills(cell, state["task"])
         out = await cell.build(fill, recipe).run(
             state["task"], bind={"llm": executor}, budget=budget
         )
-        if not out.ok:
-            raise RuntimeError(f"cell {cell.name!r} failed: {out.reason}")
-        return out.value
+        try:
+            return out.unwrap()
+        except RunError as e:
+            raise RunError(f"cell {cell.name!r}: {e}") from None
 
-    return _intake(card) + _picker(selector).into("recipe") + execute
+    return _intake(card, menu) + _picker(selector).into("recipe") + execute
