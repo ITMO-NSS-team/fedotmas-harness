@@ -17,7 +17,9 @@ EMPTY = Store().snapshot()
 
 
 def report(index=0, step=None, fired=("x",)):
-    return StepReport(step if step is not None else index, index, list(fired), [])
+    return StepReport(
+        step if step is not None else index, index, list(fired), [], EMPTY
+    )
 
 
 @pytest.mark.parametrize("bad", [0, -3])

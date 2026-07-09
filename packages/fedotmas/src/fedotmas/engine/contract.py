@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from typing import Any, Protocol, runtime_checkable
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Status(str, Enum):
@@ -35,7 +35,10 @@ class Fact(BaseModel):
     """One entry in the store: a `tag` naming the value, the `value` itself, and the provenance
     the engine stamps on write (`producer` node, `step` clock). `meta` carries side data, e.g.
     an error's traceback. The store keeps every version; `key` is the identity that separates
-    them."""
+    them. Frozen so a shared `Snapshot` cannot be mutated behind a plugin's back; `meta` is a
+    shallow exception (the dict itself stays mutable). Rewrites go through `model_copy`."""
+
+    model_config = ConfigDict(frozen=True)
 
     tag: str
     value: Any = None

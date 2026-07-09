@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from fedotmas._addressing import base_of
 from fedotmas.engine.system import System
-from fedotmas.serialize._dataflow import _edges
+from fedotmas.serialize._graph import _edges
 
 
 class BlueprintNode(BaseModel):

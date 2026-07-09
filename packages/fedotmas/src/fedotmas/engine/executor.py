@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import traceback
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Iterable, Sequence
 from typing import Literal, NamedTuple, Protocol
 
 from fedotmas.engine.contract import Fact, Key, Node, Status, View
+from fedotmas.engine.plugin import Plugin, PluginDispatcher
 from fedotmas.engine.policy import FireAll, Policy
 from fedotmas.engine.report import Run, StepReport
 from fedotmas.engine.store import Store
@@ -22,6 +23,7 @@ class Executor(Protocol):
         seed: Iterable[Fact] = (),
         terminate: Terminate | None = None,
         policy: Policy | None = None,
+        plugins: Sequence[Plugin] | PluginDispatcher = (),
     ) -> AsyncIterator[StepReport]: ...
 
     async def run(
@@ -32,6 +34,7 @@ class Executor(Protocol):
         seed: Iterable[Fact] = (),
         terminate: Terminate | None = None,
         policy: Policy | None = None,
+        plugins: Sequence[Plugin] | PluginDispatcher = (),
     ) -> Run: ...
 
 
@@ -95,7 +98,10 @@ def _error_fact(name: str, message: str, step: int, exc: Exception | None) -> Fa
 class ReactiveExecutor:
     """The superstep loop. `halt_on_error` (default True) ends the run on the first failed
     node; with False the error is still committed as a fact and reported, but the rest of the
-    system keeps running and the Run carries Status.ERROR at the end."""
+    system keeps running and the Run carries Status.ERROR at the end. `plugins` accepts the
+    raw list or an already-bound PluginDispatcher; `after_run` fires when a run completes —
+    for `stream`, that is the natural end of the iteration, so an abandoned stream fires no
+    end hook."""
 
     def __init__(self, *, halt_on_error: bool = True) -> None:
         self._halt = halt_on_error
@@ -108,48 +114,16 @@ class ReactiveExecutor:
         seed: Iterable[Fact] = (),
         terminate: Terminate | None = None,
         policy: Policy | None = None,
+        plugins: Sequence[Plugin] | PluginDispatcher = (),
     ) -> AsyncIterator[StepReport]:
-        active = policy or FireAll()
-        store.commit(_seed(seed, store.next_step() - 1))
-        last_input: dict[str, frozenset[Key]] = {}
-        index = 0
-        while True:
-            view = store.snapshot()
-            step = store.next_step()
-            armed = _ready(system, view, last_input)
-            chosen = {n.name for n in active.select([a.node for a in armed], view)}
-            armed = [a for a in armed if a.node.name in chosen]
-            if not armed:
-                yield StepReport(step, index, [], [])
-                return
-            results = await asyncio.gather(
-                *(a.node.invoke(a.input, view) for a in armed),
-                return_exceptions=True,
-            )
-            writes: list[Fact] = []
-            errors: list[Fact] = []
-            for a, result in zip(armed, results):
-                last_input[a.node.name] = a.key
-                if isinstance(result, BaseException):
-                    if not isinstance(result, Exception):
-                        raise result
-                    errors.append(_error_fact(a.node.name, str(result), step, result))
-                    continue
-                if result.status is Status.ERROR:
-                    errors.append(
-                        _error_fact(a.node.name, result.error or "", step, None)
-                    )
-                writes.extend(_stamp(result.writes, a.node.name, step))
-            store.commit([*writes, *errors])
-            report = StepReport(
-                step, index, [a.node.name for a in armed], writes, errors
-            )
+        dispatcher = PluginDispatcher.of(plugins)
+        steps: list[StepReport] = []
+        async for report in self._steps(
+            system, store, seed, terminate, policy, dispatcher
+        ):
+            steps.append(report)
             yield report
-            if errors and self._halt:
-                return
-            if terminate is not None and terminate.done(store.snapshot(), report):
-                return
-            index += 1
+        await dispatcher.after_run(self._finish(steps, store, dispatcher.scope))
 
     async def run(
         self,
@@ -159,13 +133,87 @@ class ReactiveExecutor:
         seed: Iterable[Fact] = (),
         terminate: Terminate | None = None,
         policy: Policy | None = None,
+        plugins: Sequence[Plugin] | PluginDispatcher = (),
     ) -> Run:
+        dispatcher = PluginDispatcher.of(plugins)
         steps = [
             report
-            async for report in self.stream(
-                system, store, seed=seed, terminate=terminate, policy=policy
+            async for report in self._steps(
+                system, store, seed, terminate, policy, dispatcher
             )
         ]
+        run = self._finish(steps, store, dispatcher.scope)
+        await dispatcher.after_run(run)
+        return run
+
+    async def _steps(
+        self,
+        system: System,
+        store: Store,
+        seed: Iterable[Fact],
+        terminate: Terminate | None,
+        policy: Policy | None,
+        dispatcher: PluginDispatcher,
+    ) -> AsyncIterator[StepReport]:
+        active = policy or FireAll()
+        scope = dispatcher.scope
+        store.commit(_seed(seed, store.next_step() - 1))
+        await dispatcher.before_run(system, store.snapshot())
+        last_input: dict[str, frozenset[Key]] = {}
+        index = 0
+        while True:
+            view = store.snapshot()
+            step = store.next_step()
+            armed = _ready(system, view, last_input)
+            chosen = {n.name for n in active.select([a.node for a in armed], view)}
+            armed = [a for a in armed if a.node.name in chosen]
+            if not armed:
+                report = StepReport(step, index, [], [], view=view, scope=scope)
+                await dispatcher.after_step(report)
+                yield report
+                return
+            results = await asyncio.gather(
+                *(dispatcher.invoke(a.node, a.input, view) for a in armed),
+                return_exceptions=True,
+            )
+            writes: list[Fact] = []
+            errors: list[Fact] = []
+            for a, result in zip(armed, results):
+                last_input[a.node.name] = a.key
+                if isinstance(result, BaseException):
+                    if not isinstance(result, Exception):
+                        raise result
+                    error = _error_fact(a.node.name, str(result), step, result)
+                    await dispatcher.on_error(a.node, error, view)
+                    errors.append(error)
+                    continue
+                if result.status is Status.ERROR:
+                    error = _error_fact(a.node.name, result.error or "", step, None)
+                    await dispatcher.on_error(a.node, error, view)
+                    errors.append(error)
+                writes.extend(_stamp(result.writes, a.node.name, step))
+            store.commit([*writes, *errors])
+            post = store.snapshot()
+            report = StepReport(
+                step,
+                index,
+                [a.node.name for a in armed],
+                writes,
+                view=post,
+                errors=errors,
+                scope=scope,
+            )
+            await dispatcher.after_step(report)
+            yield report
+            if errors and self._halt:
+                return
+            if terminate is not None and terminate.done(post, report):
+                return
+            index += 1
+
+    def _finish(
+        self, steps: list[StepReport], store: Store, scope: tuple[str, ...]
+    ) -> Run:
         status = Status.ERROR if any(s.errors for s in steps) else Status.OK
         last = steps[-1]
         if self._halt and last.errors:
@@ -174,4 +222,4 @@ class ReactiveExecutor:
             reason = "quiescence"
         else:
             reason = "terminate"
-        return Run(status, steps, store.snapshot(), reason)
+        return Run(status, steps, store.snapshot(), reason, scope)

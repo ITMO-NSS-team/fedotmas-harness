@@ -21,7 +21,7 @@ class FireAll:
 
 
 class AuctionSelect:
-    """Fire only the single highest-scoring node, the contract-net seam. `key` is the bid each
+    """Fire only the single highest-scoring node, the contract-net selection. `key` is the bid each
     node makes given the store; ties break on iteration order."""
 
     def __init__(self, key: Callable[[Node, View], float]) -> None:

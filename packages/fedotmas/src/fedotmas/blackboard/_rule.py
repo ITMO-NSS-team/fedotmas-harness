@@ -56,7 +56,7 @@ class Rule:
     def _body(self, bind: Mapping[str, Any]) -> _BoundFn:
         """The rule's step as an `(input, view)` body. The base rule adapts `fn`; an extension
         subclass overrides this to build its body from the run-scoped `bind` (e.g. a prompt
-        rule resolving `bind["llm"]`). The one seam a new rule-kind implements."""
+        rule resolving `bind["llm"]`). The one extension point a new rule-kind implements."""
         if self.fn is None:
             raise ValueError(f"rule {self.name!r}: fn= is required")
         return bind_async(self.fn)

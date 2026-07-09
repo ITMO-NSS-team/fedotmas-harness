@@ -1,28 +1,27 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from fedotmas._outcome import Outcome
 from fedotmas.blackboard._rule import Rule
-from fedotmas.engine.contract import Fact
-from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.policy import Policy
-from fedotmas.engine.report import StepReport
-from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
-from fedotmas.engine.terminate import Budget, Goal, Terminate
+
+if TYPE_CHECKING:
+    from fedotmas.engine.outcome import Outcome
+    from fedotmas.engine.plugin import Plugin
+    from fedotmas.engine.policy import Policy
+    from fedotmas.engine.report import StepReport
 
 
 @dataclass
 class Board:
     """An assembled blackboard: the rules plus a run surface symmetric with Flow.run. A board
     has no single typed output, so `run` takes the seed facts as a tag -> value dict and a
-    `goal` tag to read the result back from; everything else (store, terminate, budget cap)
-    is derived. `stream` is the same run yielded step by step. `compile` produces the engine
-    System (`system` is its no-argument form), for executor-level control and for what nest()
-    picks up when a board becomes one node of a flow.
+    `goal` tag to read the result back from; both delegate to System.run/System.stream.
+    `compile` produces the engine System (`system` is its no-argument form), for
+    executor-level control and for what nest() picks up when a board becomes one node of a
+    flow.
     """
 
     rules: tuple[Rule, ...]
@@ -38,19 +37,6 @@ class Board:
     def system(self) -> System:
         return self.compile()
 
-    def _prepare(
-        self,
-        seed: dict[str, Any],
-        goal: str,
-        budget: int | None,
-        bind: Mapping[str, Any] | None,
-    ) -> tuple[System, list[Fact], Terminate]:
-        terminate: Terminate = Goal(lambda v: v.exists(goal))
-        if budget is not None:
-            terminate = terminate | Budget(budget)
-        facts = [Fact(tag=tag, value=value) for tag, value in seed.items()]
-        return self.compile(bind), facts, terminate
-
     async def run(
         self,
         seed: dict[str, Any],
@@ -60,12 +46,16 @@ class Board:
         budget: int | None = 100,
         policy: Policy | None = None,
         halt_on_error: bool = True,
+        plugins: Sequence[Plugin] = (),
     ) -> Outcome:
-        system, facts, terminate = self._prepare(seed, goal, budget, bind)
-        run = await ReactiveExecutor(halt_on_error=halt_on_error).run(
-            system, Store(), seed=facts, terminate=terminate, policy=policy
+        return await self.compile(bind).run(
+            seed,
+            goal=goal,
+            budget=budget,
+            policy=policy,
+            halt_on_error=halt_on_error,
+            plugins=plugins,
         )
-        return Outcome(run, goal)
 
     async def stream(
         self,
@@ -76,11 +66,16 @@ class Board:
         budget: int | None = 100,
         policy: Policy | None = None,
         halt_on_error: bool = True,
+        plugins: Sequence[Plugin] = (),
     ) -> AsyncIterator[StepReport]:
         """The streaming form of .run: yields each StepReport as the run unfolds."""
-        system, facts, terminate = self._prepare(seed, goal, budget, bind)
-        async for report in ReactiveExecutor(halt_on_error=halt_on_error).stream(
-            system, Store(), seed=facts, terminate=terminate, policy=policy
+        async for report in self.compile(bind).stream(
+            seed,
+            goal=goal,
+            budget=budget,
+            policy=policy,
+            halt_on_error=halt_on_error,
+            plugins=plugins,
         ):
             yield report
 

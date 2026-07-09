@@ -15,7 +15,7 @@ class RunError(RuntimeError):
 
 @dataclass
 class Outcome:
-    """The outcome of a run surface (Flow.run, Board.run): the engine Run plus the out tag,
+    """The outcome of a run surface (System.run, Flow.run, Board.run): the engine Run plus the out tag,
     read back as one object. `value` is the produced output (None if the run never reached
     it), `ok` is "finished clean and produced the output", and `reason` says how the run
     ended: "goal" (output produced), "error" (a node failed, see `errors`), "budget" (step

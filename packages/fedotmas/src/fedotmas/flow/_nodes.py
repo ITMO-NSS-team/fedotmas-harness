@@ -11,6 +11,7 @@ from fedotmas._condition import Predicate, spec_of
 from fedotmas.engine.contract import Fact, Kind, Node, Result, Status, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.node import as_node
+from fedotmas.engine.plugin import PluginDispatcher
 from fedotmas.engine.report import Run
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
@@ -22,7 +23,12 @@ if TYPE_CHECKING:
 
 @dataclass
 class Ctx:
+    """The compile context threaded through _build: run-scoped `bindings`, the run's
+    `plugins` dispatcher (nest/loop derive the inner face from it), and the fresh-name
+    counter."""
+
     bindings: Mapping[str, Any] = field(default_factory=dict)
+    plugins: PluginDispatcher = field(default_factory=PluginDispatcher)
     n: int = 0
 
     def fresh(self, hint: str) -> str:
@@ -163,12 +169,15 @@ def _nest_node(
     inner_out: str,
     budget: int | None,
     until: Terminate | None = None,
+    plugins: PluginDispatcher | None = None,
 ) -> Node:
     """Run a whole sub-system as one node: seed its own inner store with the outer input, run
     until the inner output exists (or `until`, if given), write it back as one fact. The interior
     stays opaque to the outer engine; a failure surfaces as this node's error. `budget` is the
     inner superstep cap folded into the terminate here, stamped on the Card so the round-trip
-    restores the same bound."""
+    restores the same bound. `plugins` is the nested dispatcher face: observers follow the
+    inner run, interceptors apply to this node as a whole, not again to every inner node."""
+    inner_plugins = plugins or PluginDispatcher()
     term: Terminate = until or Goal(lambda v: v.exists(inner_out))
     if budget is not None:
         term = any_of(term, Budget(budget))
@@ -179,6 +188,7 @@ def _nest_node(
             Store(),
             seed=[Fact(tag=inner_entry, value=view.value(entry) if entry else None)],
             terminate=term,
+            plugins=inner_plugins,
         )
         _inner_guard(run, inner_out, f"nest {name!r}")
         return Result(writes=[Fact(tag=name, value=run.view.value(inner_out))])
@@ -218,12 +228,15 @@ def _loop_iterate_node(
     until: Callable[[Any, View], bool],
     pred: Predicate | None,
     budget: int | None,
+    plugins: PluginDispatcher | None = None,
 ) -> Node:
     """One round per firing: feed the latest state (the entry fact on round one) into the
     body in a fresh inner store, write its output as the next state version. Re-arms while
     `until` has not yet cleared on the latest state. `budget` is the per-round superstep cap
     folded into the round terminate here, stamped on the Card so the round-trip restores the
-    same bound."""
+    same bound. `plugins` is the nested dispatcher face: observers follow each round,
+    interceptors apply to this node as a whole, not again to every body node."""
+    inner_plugins = plugins or PluginDispatcher()
     round_term: Terminate = Goal(lambda v: v.exists(body_out))
     if budget is not None:
         round_term = any_of(round_term, Budget(budget))
@@ -232,7 +245,11 @@ def _loop_iterate_node(
         seen = view.query(f"{state}:*")
         src = seen[-1].value if seen else (view.value(entry) if entry else None)
         run = await ReactiveExecutor().run(
-            body, Store(), seed=[Fact(tag=body_in, value=src)], terminate=round_term
+            body,
+            Store(),
+            seed=[Fact(tag=body_in, value=src)],
+            terminate=round_term,
+            plugins=inner_plugins,
         )
         _inner_guard(run, body_out, f"loop {name!r} round {len(seen) + 1}")
         return Result(

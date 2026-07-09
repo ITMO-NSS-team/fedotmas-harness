@@ -1,6 +1,6 @@
 import asyncio
 
-from fedotmas import action, branch, run
+from fedotmas import action, branch
 from fedotmas.serialize import Blueprint, Deps, from_blueprint, to_blueprint
 
 
@@ -21,7 +21,7 @@ async def pick_b(state: dict) -> str:
 
 
 async def _out(system, seed_tag, value, goal):
-    out = await run(system, {seed_tag: value}, goal=goal)
+    out = await system.run({seed_tag: value}, goal=goal)
     return out.value
 
 
