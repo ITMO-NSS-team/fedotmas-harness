@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping, Sequence
 from dataclasses import KW_ONLY, dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from fedotmas.engine.contract import Fact, Node
 from fedotmas.engine.outcome import Outcome
@@ -99,3 +99,22 @@ class System:
             self, Store(), seed=facts, terminate=terminate, plugins=dispatcher
         ):
             yield report
+
+
+class Compilable(Protocol):
+    """The one contract a container satisfies to enter composition: render yourself as a
+    System. nest() and Rule(nest=) accept any object with this method — a Flow, a Board, a
+    third-party container — so new container kinds plug in without the core switching on
+    classes. `entry`/`out` are the boundary tags: a container with no addressing of its own
+    (a flow) compiles to them, one whose tags are fixed (a board) reads them as references.
+    `bind` is the run-scoped binding map; `plugins` is the dispatcher whose nested faces are
+    baked into interior boundaries at compile."""
+
+    def system(
+        self,
+        *,
+        entry: str = "in",
+        out: str = "out",
+        bind: Mapping[str, Any] | None = None,
+        plugins: Sequence[Plugin] | PluginDispatcher = (),
+    ) -> System: ...

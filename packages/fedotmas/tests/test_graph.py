@@ -67,7 +67,7 @@ async def test_board_graph():
         Rule("score", score, reads="draft", writes="score"),
         Rule("gate", gate, reads="score", writes="verdict", when=["score", "!verdict"]),
     )
-    system = board.compile()
+    system = board.system()
     run = await ReactiveExecutor().run(
         system,
         Store(),

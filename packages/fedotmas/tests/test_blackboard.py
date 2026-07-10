@@ -1,8 +1,8 @@
 """The blackboard surface: produce-once, when triggers, re-fire identity, validation."""
 
 import pytest
-from fedotmas import Condition, Rule, blackboard
-from fedotmas.engine import AuctionSelect, Fact, Goal, ReactiveExecutor, Store
+from fedotmas import Condition, Rule, action, blackboard
+from fedotmas.engine import AuctionSelect, Fact, Goal, ReactiveExecutor, Store, System
 
 
 async def bump(value, view):
@@ -59,7 +59,7 @@ async def test_positive_when_tags_join_the_refire_identity():
     store = Store()
     fed = False
     async for _ in ReactiveExecutor().stream(
-        board.system,
+        board.system(),
         store,
         seed=[Fact(tag="sig", value=1)],
         terminate=Goal(lambda v: v.count("out") >= 2),
@@ -129,6 +129,56 @@ async def test_a_repair_rule_reacts_to_another_rules_error():
     assert not out.ok
 
 
+async def test_a_rule_runs_a_flow_as_its_body():
+    board = blackboard(
+        Rule("prep", fn=bump, reads="task", writes="topic"),
+        Rule(
+            "research",
+            nest=action(bump) + action(bump),
+            reads="topic",
+            writes="report",
+        ),
+    )
+    out = await board.run({"task": 1}, goal="report")
+    assert out.ok
+    assert out.value == 4
+
+
+async def test_a_board_nests_another_board_as_a_rule():
+    inner = blackboard(Rule("solve", fn=bump, reads="q", writes="a"))
+    outer = blackboard(
+        Rule("delegate", nest=inner, reads="task", writes="answer", entry="q", out="a")
+    )
+    out = await outer.run({"task": 41}, goal="answer")
+    assert out.ok
+    assert out.value == 42
+
+
+async def test_a_nest_rule_failure_carries_the_inner_causes():
+    async def die(q):
+        raise ValueError("inner boom")
+
+    inner = blackboard(Rule("worker", fn=die, reads="q", writes="a"))
+    outer = blackboard(
+        Rule("sub", nest=inner, reads="task", writes="answer", entry="q", out="a")
+    )
+    out = await outer.run({"task": 1}, goal="answer")
+    assert out.reason == "error"
+    err = out.errors[0]
+    assert err.tag == "error:sub"
+    assert "inner system failed" in err.value
+    [cause] = err.meta["causes"]
+    assert cause["producer"] == "worker"
+    assert cause["meta"]["type"] == "ValueError"
+
+
+def test_board_system_rejects_an_unwritten_out():
+    board = blackboard(Rule("r", fn=bump, reads="a", writes="b"))
+    with pytest.raises(ValueError, match="no rule writes"):
+        board.system(out="c")
+    assert board.system(out="b").nodes
+
+
 async def test_a_board_policy_holds_an_auction_each_superstep():
     def says(name):
         async def fn(value, view):
@@ -150,7 +200,7 @@ async def test_a_board_policy_holds_an_auction_each_superstep():
 
 def test_meta_rides_to_the_card():
     board = blackboard(Rule("r", fn=mark, reads="a", writes="b", meta={"bid": 3}))
-    assert board.system.nodes[0].describe().meta == {"bid": 3}
+    assert board.system().nodes[0].describe().meta == {"bid": 3}
 
 
 @pytest.mark.parametrize(
@@ -164,6 +214,10 @@ def test_meta_rides_to_the_card():
             Rule("r", fn=bump, writes="c", when=["a", ""]), id="empty-when-tag"
         ),
         pytest.param(Rule("r", fn=bump, writes="c", when="tag"), id="bare-string-when"),
+        pytest.param(Rule("r", fn=bump, nest=System([]), writes="c"), id="fn-and-nest"),
+        pytest.param(
+            Rule("r", nest=System([]), writes="c", entry=""), id="nest-empty-entry"
+        ),
     ],
 )
 def test_rule_validation(rule):

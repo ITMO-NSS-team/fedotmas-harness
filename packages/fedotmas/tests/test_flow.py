@@ -13,7 +13,16 @@ from fedotmas import (
     gather,
     nest,
 )
-from fedotmas.engine import AuctionSelect, Fact, Goal, ReactiveExecutor, Store
+from fedotmas.engine import (
+    AuctionSelect,
+    Fact,
+    Goal,
+    ReactiveExecutor,
+    Result,
+    Store,
+    System,
+    as_node,
+)
 from pydantic import BaseModel
 
 
@@ -248,7 +257,7 @@ async def test_nest_budget_caps_a_non_quiescing_inner_board():
             when=lambda v: v.exists("tick"),
         ),
     )
-    wrapped = nest(spinner.system, entry="tick", out="never", budget=5)
+    wrapped = nest(spinner.system(), entry="tick", out="never", budget=5)
     run = await wrapped.run("start", budget=50)
     assert not run.ok
     assert run.reason == "error"
@@ -291,13 +300,21 @@ async def test_a_deep_failure_arrives_as_a_tree_of_causes():
 
 
 async def test_a_stalled_inner_run_names_its_reason():
+    """The raw System floor skips the board's out-validation, so an inner run can still
+    quiesce short of the goal — and the boundary names that stall, not a failure."""
     inner = blackboard(Rule("aside", fn=echo, reads="task", writes="elsewhere"))
-    run = await nest(inner, entry="task", out="out").run("job")
+    run = await nest(inner.system(), entry="task", out="out").run("job")
     assert not run.ok
     err = run.errors[0]
     assert err.meta["reason"] == "stalled"
     assert err.meta["causes"] == []
     assert "stopped (quiescence)" in err.value
+
+
+async def test_nest_rejects_a_board_out_nothing_writes():
+    inner = blackboard(Rule("aside", fn=echo, reads="task", writes="elsewhere"))
+    with pytest.raises(ValueError, match="no rule writes"):
+        await nest(inner, entry="task", out="out").run("job")
 
 
 async def test_join_waves_do_not_mix_across_unequal_branches():
@@ -425,3 +442,24 @@ async def test_a_strict_board_inside_nest_fails_on_the_same_rule():
     run = await nest(board, entry="seed", out="answer").run(3)
     assert not run.ok
     assert run.errors
+
+
+async def test_nest_accepts_any_compilable():
+    """The open boundary: any object exposing .system(...) enters the arrow world; the core
+    never switches on its class."""
+
+    class Doubler:
+        def system(self, *, entry="in", out="out", bind=None, plugins=()):
+            async def invoke(input, view):
+                return Result(writes=[Fact(tag=out, value=view.value(entry) * 2)])
+
+            return System([as_node(invoke, name="dbl", reads=entry, writes=[out])])
+
+    run = await nest(Doubler(), entry="q", out="a").run(21)
+    assert run.ok
+    assert run.value == 42
+
+
+async def test_flow_system_compiles_with_default_tags():
+    out = await action(double).system().run({"in": 2})
+    assert out.value == 4

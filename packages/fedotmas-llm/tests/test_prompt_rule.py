@@ -59,7 +59,7 @@ async def test_prompt_and_code_rules_share_one_board():
 def test_prompt_rule_without_a_backend_fails_at_compile_time():
     board = blackboard(PromptRule("r", prompt="say", writes="ans", when=["q"]))
     with pytest.raises(ValueError, match="no llm bound"):
-        board.compile()
+        board.system()
 
 
 def test_prompt_rule_requires_a_prompt():

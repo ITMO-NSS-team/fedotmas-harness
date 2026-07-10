@@ -10,10 +10,8 @@ from fedotmas._addressing import Branch, Loop, alias, build_id
 from fedotmas._condition import Predicate, spec_of
 from fedotmas.engine.contract import Fact, Kind, Node, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.node import as_node
-from fedotmas.engine.outcome import Outcome, RunError
+from fedotmas.engine.node import as_node, inner_guard, system_step
 from fedotmas.engine.plugin import PluginDispatcher
-from fedotmas.engine.report import Run
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
 from fedotmas.engine.terminate import Budget, Goal, Terminate, any_of
@@ -175,25 +173,23 @@ def _nest_node(
     """Run a whole sub-system as one node: seed its own inner store with the outer input, run
     until the inner output exists (or `until`, if given), write it back as one fact. The interior
     stays opaque to the outer engine; a failure surfaces as this node's error fact, the inner
-    errors nested as its causes. `budget` is the
-    inner superstep cap folded into the terminate here, stamped on the Card so the round-trip
-    restores the same bound. `plugins` is the nested dispatcher face: observers follow the
-    inner run, interceptors apply to this node as a whole, not again to every inner node."""
-    inner_plugins = plugins or PluginDispatcher()
-    term: Terminate = until or Goal(lambda v: v.exists(inner_out))
-    if budget is not None:
-        term = any_of(term, Budget(budget))
+    errors nested as its causes (see engine.node.system_step, the shared primitive). `budget` is
+    the inner superstep cap folded into the terminate there, stamped on the Card so the
+    round-trip restores the same bound. `plugins` is the nested dispatcher face: observers follow
+    the inner run, interceptors apply to this node as a whole, not again to every inner node."""
+    step = system_step(
+        system,
+        entry=inner_entry,
+        out=inner_out,
+        budget=budget,
+        until=until,
+        plugins=plugins,
+        label=f"nest {name!r}",
+    )
 
     async def invoke(input: Any, view: View) -> Result:
-        run = await ReactiveExecutor().run(
-            system,
-            Store(),
-            seed=[Fact(tag=inner_entry, value=view.value(entry) if entry else None)],
-            terminate=term,
-            plugins=inner_plugins,
-        )
-        _inner_guard(run, inner_out, f"nest {name!r}")
-        return Result(writes=[Fact(tag=name, value=run.view.value(inner_out))])
+        value = await step(view.value(entry) if entry else None)
+        return Result(writes=[Fact(tag=name, value=value)])
 
     return as_node(
         invoke,
@@ -203,26 +199,6 @@ def _nest_node(
         params={"entry": inner_entry, "out": inner_out, "budget": budget},
         system=system,
     )
-
-
-def _inner_guard(run: Run, out: str, what: str) -> None:
-    """Surface an inner run's failure as this node's failure: RunError carries the inner
-    error facts across the boundary, so the outer executor records them as this node's
-    meta["causes"] tree instead of a flattened string. Only a strict inner system ends with
-    reason "error"; a lenient one (halt_on_error=False) that still produced `out` passes,
-    its recorded errors noise by its own declaration."""
-    inner = Outcome(run, out)
-    if run.reason == "error":
-        msgs = "; ".join(f"{e.producer}: {e.value}" for e in inner.errors)
-        raise RunError(
-            f"{what}: inner system failed ({msgs})", errors=inner.errors, reason="error"
-        )
-    if not run.view.exists(out):
-        raise RunError(
-            f"{what}: inner system stopped ({run.reason}) before producing {out!r}",
-            errors=inner.errors,
-            reason=inner.reason,
-        )
 
 
 def _loop_iterate_node(
@@ -259,7 +235,7 @@ def _loop_iterate_node(
             terminate=round_term,
             plugins=inner_plugins,
         )
-        _inner_guard(run, body_out, f"loop {name!r} round {len(seen) + 1}")
+        inner_guard(run, body_out, f"loop {name!r} round {len(seen) + 1}")
         return Result(
             writes=[
                 Fact(tag=f"{state}:{len(seen) + 1}", value=run.view.value(body_out))

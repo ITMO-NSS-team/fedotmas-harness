@@ -65,7 +65,7 @@ async def test_roundtrip_board():
         Rule("score", score, reads="draft", writes="score"),
         Rule("gate", gate, reads="score", writes="verdict", when=["score", "!verdict"]),
     )
-    system = board.compile()
+    system = board.system()
     bp = to_blueprint(system)
     rebuilt = from_blueprint(bp, Deps(bodies={"score": score, "gate": gate}))
     assert to_blueprint(rebuilt) == bp
@@ -112,6 +112,24 @@ async def test_roundtrip_nest_keeps_non_default_budget():
     assert to_blueprint(rebuilt) == bp
     assert await _out(rebuilt, "in", "a b c", "out") == await _out(
         system, "in", "a b c", "out"
+    )
+
+
+async def test_roundtrip_nest_rule():
+    """A rule whose body is a whole sub-system rebuilds from the blueprint alone plus the
+    leaf bodies: the inner system is declarative, not a callable hole."""
+    inner = blackboard(Rule("count", count, reads="q", writes="a"))
+    board = blackboard(
+        Rule("sub", nest=inner, reads="task", writes="answer", entry="q", out="a"),
+        Rule("gate", gate, reads="answer", writes="verdict"),
+    )
+    system = board.system()
+    bp = to_blueprint(system)
+    rebuilt = from_blueprint(bp, Deps(bodies={"count": count, "gate": gate}))
+    assert to_blueprint(rebuilt) == bp
+    text = "a b c"
+    assert await _out(rebuilt, "task", text, "verdict") == await _out(
+        system, "task", text, "verdict"
     )
 
 
@@ -175,6 +193,6 @@ def test_a_policy_marked_blueprint_refuses_to_rebuild():
         Rule("score", score, reads="seed", writes="out"),
         policy=AuctionSelect(key=lambda n, v: 1.0),
     )
-    bp = to_blueprint(board.system)
+    bp = to_blueprint(board.system())
     with pytest.raises(ReconstructError, match="policy"):
         from_blueprint(bp, Deps(bodies={"score": score}))

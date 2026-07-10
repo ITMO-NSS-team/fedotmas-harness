@@ -124,14 +124,27 @@ def _nest(n: BlueprintNode, deps: Deps) -> Node:
 
 
 def _rule(n: BlueprintNode, deps: Deps) -> Node:
-    rule = Rule(
-        n.name,
-        deps.bodies.get(n.base) or _missing(n.name),
-        writes=_first(n.writes),
-        reads=n.params.get("input", ""),
-        when=_when(n.name, n.params.get("when")),
-        meta=dict(n.meta),
-    )
+    if n.inner is not None:
+        rule = Rule(
+            n.name,
+            nest=from_blueprint(n.inner, deps),
+            writes=_first(n.writes),
+            reads=n.params.get("input", ""),
+            when=_when(n.name, n.params.get("when")),
+            entry=n.params["entry"],
+            out=n.params["out"],
+            budget=n.params.get("budget", 100),
+            meta=dict(n.meta),
+        )
+    else:
+        rule = Rule(
+            n.name,
+            deps.bodies.get(n.base) or _missing(n.name),
+            writes=_first(n.writes),
+            reads=n.params.get("input", ""),
+            when=_when(n.name, n.params.get("when")),
+            meta=dict(n.meta),
+        )
     return rule.to_node(deps.bind)
 
 

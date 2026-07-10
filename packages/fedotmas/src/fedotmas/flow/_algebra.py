@@ -8,7 +8,7 @@ from fedotmas._condition import Predicate, _pick, state_predicate
 from fedotmas._inject import bind_pred
 from fedotmas.engine.contract import Kind, Node, View
 from fedotmas.engine.plugin import Plugin, PluginDispatcher
-from fedotmas.engine.system import System
+from fedotmas.engine.system import Compilable, System
 from fedotmas.engine.terminate import Terminate
 from fedotmas.flow._nodes import (
     Ctx,
@@ -23,7 +23,6 @@ from fedotmas.flow._nodes import (
 )
 
 if TYPE_CHECKING:
-    from fedotmas.blackboard import Board
     from fedotmas.engine.outcome import Outcome
     from fedotmas.engine.policy import Policy
     from fedotmas.engine.report import StepReport
@@ -49,19 +48,21 @@ class Flow(Generic[A, B]):
     def system(
         self,
         *,
-        entry: str,
-        out: str,
+        entry: str = "in",
+        out: str = "out",
         bind: Mapping[str, Any] | None = None,
         plugins: Sequence[Plugin] | PluginDispatcher = (),
         policy: Policy | None = None,
         halt_on_error: bool = True,
     ) -> System:
-        """Compile to a runnable System. `bind` is the run-scoped binding map threaded to every
-        node's builder (e.g. a default backend under "llm"); a node that needs a binding nobody
-        supplied fails here, not mid-run. `plugins` are baked into nested boundaries at compile:
-        nest and loop nodes capture the observer face for their inner runs, which is why plugins
-        given only at run time cannot reach inside an already-compiled system. `policy` and
-        `halt_on_error` become the compiled system's own discipline (see System)."""
+        """Compile to a runnable System — the Compilable face. A flow is anonymous dataflow,
+        so `entry`/`out` are assigned, not referenced (the defaults are .run's own choice).
+        `bind` is the run-scoped binding map threaded to every node's builder (e.g. a default
+        backend under "llm"); a node that needs a binding nobody supplied fails here, not
+        mid-run. `plugins` are baked into nested boundaries at compile: nest and loop nodes
+        capture the observer face for their inner runs, which is why plugins given only at run
+        time cannot reach inside an already-compiled system. `policy` and `halt_on_error`
+        become the compiled system's own discipline (see System)."""
         ctx = Ctx(bindings=bind or {}, plugins=PluginDispatcher.of(plugins))
         nodes, last = self._build(ctx, entry)
         if last != out:
@@ -320,7 +321,7 @@ def gather(*flows: Flow[A, B]) -> Flow[A, list[B]]:
 class _Nest(Flow[A, B]):
     def __init__(
         self,
-        target: System | Flow[A, B] | Board,
+        target: Flow[A, B] | System | Compilable,
         *,
         entry: str,
         out: str,
@@ -337,14 +338,14 @@ class _Nest(Flow[A, B]):
         name = ctx.fresh("nest")
         inner_entry, inner_out = self._entry, self._out
         inner = ctx.plugins.nested(name)
-        if isinstance(self._target, Flow):
-            system = self._target.system(
+        target = self._target
+        system = (
+            target
+            if isinstance(target, System)
+            else target.system(
                 entry=inner_entry, out=inner_out, bind=ctx.bindings, plugins=inner
             )
-        elif isinstance(self._target, System):
-            system = self._target
-        else:  # a Board: thread the flow's run-scoped bindings as its rules' fallback
-            system = self._target.compile(ctx.bindings)
+        )
         nest = _nest_node(
             name,
             system=system,
@@ -359,7 +360,7 @@ class _Nest(Flow[A, B]):
 
 
 def nest(
-    target: System | Flow[A, B] | Board,
+    target: Flow[A, B] | System | Compilable,
     *,
     entry: str,
     out: str,
@@ -367,18 +368,19 @@ def nest(
     budget: int | None = 100,
 ) -> Flow[A, B]:
     """Run a whole sub-system as one typed arrow node: its own inner store, run to a goal,
-    one fact out. The boundary is typed and composes; the interior stays opaque. This is
-    how a goal-terminating Board (the blackboard surface) enters the arrow world, and how a
-    flow nests another flow as an isolated unit. A Flow or Board target picks up the outer
-    flow's run-scoped bindings as its fallback; a System is already compiled, so they do not
-    reach inside it. The inner run is the outer node's single superstep, so the
-    outer budget cannot interrupt it; `budget` caps the inner supersteps instead (the default
-    100 is a runaway guard, None lifts it). The inner system runs under its own discipline:
-    a strict one (the default) halts on its first error and the failure surfaces as this
-    node's error fact, while a lenient one (halt_on_error=False) that still reaches `out`
-    counts as success, its errors observable through on_error. The outer halt_on_error then
-    decides whether the rest of the system continues. Named nest, not embed, to avoid the
-    embeddings reading.
+    one fact out. The boundary is typed and composes; the interior stays opaque. `target` is
+    a System or anything Compilable — a Flow, a Board, a third-party container exposing
+    `.system(...)` — so this is how a goal-terminating Board (the blackboard surface) enters
+    the arrow world, and how a flow nests another flow as an isolated unit. A Compilable
+    target picks up the outer flow's run-scoped bindings and plugins; a System is already
+    compiled, so they do not reach inside it. The inner run is the outer node's single
+    superstep, so the outer budget cannot interrupt it; `budget` caps the inner supersteps
+    instead (the default 100 is a runaway guard, None lifts it). The inner system runs under
+    its own discipline: a strict one (the default) halts on its first error and the failure
+    surfaces as this node's error fact, while a lenient one (halt_on_error=False) that still
+    reaches `out` counts as success, its errors observable through on_error. The outer
+    halt_on_error then decides whether the rest of the system continues. Named nest, not
+    embed, to avoid the embeddings reading.
 
     Example:
         research = nest(board, entry="topic", out="report", until=Goal("report"))
