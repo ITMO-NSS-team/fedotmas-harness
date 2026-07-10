@@ -219,6 +219,17 @@ async def test_unwrap_raises_run_error_naming_the_reason():
         run.unwrap()
 
 
+async def test_unwrap_carries_the_error_facts():
+    async def bad(x):
+        return x["missing"]
+
+    run = await action(bad).run({"a": 1})
+    with pytest.raises(RunError) as exc:
+        run.unwrap()
+    assert exc.value.reason == "error"
+    assert exc.value.errors == run.errors
+
+
 async def test_nest_runs_a_flow_as_one_node():
     run = await nest(action(double), entry="a", out="b").run(3)
     assert run.value == 6
@@ -242,6 +253,51 @@ async def test_nest_budget_caps_a_non_quiescing_inner_board():
     assert not run.ok
     assert run.reason == "error"
     assert "stopped (terminate)" in run.errors[0].value
+    assert run.errors[0].meta["reason"] == "budget"
+
+
+async def test_a_nest_failure_carries_the_inner_error_as_a_cause():
+    async def flaky(x):
+        raise TimeoutError("too slow")
+
+    inner = blackboard(Rule("worker", fn=flaky, reads="task", writes="out"))
+    run = await nest(inner, entry="task", out="out").run("job")
+    assert not run.ok
+    err = run.errors[0]
+    assert err.meta["type"] == "RunError"
+    assert err.meta["reason"] == "error"
+    [cause] = err.meta["causes"]
+    assert cause["producer"] == "worker"
+    assert cause["meta"]["type"] == "TimeoutError"
+    assert "too slow" in cause["meta"]["traceback"]
+
+
+async def test_a_deep_failure_arrives_as_a_tree_of_causes():
+    async def flaky(x):
+        raise ValueError("leaf boom")
+
+    leaf = blackboard(Rule("leaf", fn=flaky, reads="topic", writes="report"))
+    mid = nest(leaf, entry="topic", out="report")
+    run = await nest(mid, entry="q", out="a").run("x")
+    assert not run.ok
+    err = run.errors[0]
+    assert err.meta["type"] == "RunError"
+    [mid_cause] = err.meta["causes"]
+    assert mid_cause["meta"]["type"] == "RunError"
+    [leaf_cause] = mid_cause["meta"]["causes"]
+    assert leaf_cause["producer"] == "leaf"
+    assert leaf_cause["meta"]["type"] == "ValueError"
+    assert "leaf boom" in leaf_cause["meta"]["traceback"]
+
+
+async def test_a_stalled_inner_run_names_its_reason():
+    inner = blackboard(Rule("aside", fn=echo, reads="task", writes="elsewhere"))
+    run = await nest(inner, entry="task", out="out").run("job")
+    assert not run.ok
+    err = run.errors[0]
+    assert err.meta["reason"] == "stalled"
+    assert err.meta["causes"] == []
+    assert "stopped (quiescence)" in err.value
 
 
 async def test_join_waves_do_not_mix_across_unequal_branches():

@@ -86,7 +86,9 @@ def blackboard(
     rules needs none. `policy` arbitrates which armed rules fire each superstep (e.g.
     AuctionSelect for a contract-net board); `halt_on_error=False` declares a lenient board
     whose failed rules are recorded, not fatal. Both travel with the board through nest and
-    the blueprint round-trip.
+    the blueprint round-trip. A failed rule's record is an `error:{name}` fact in the store,
+    so on a lenient board another rule can react to it — e.g. a repair rule with
+    when=["error:planner"] fires when the planner fails.
 
     Example:
         score = Rule(name="score", reads="draft", writes="score", fn=grade)

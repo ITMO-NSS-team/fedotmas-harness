@@ -163,7 +163,20 @@ async def test_halt_on_error_ends_the_run_with_the_traceback():
     assert err.tag == "error:bad"
     assert err.value == "boom"
     assert "RuntimeError" in err.meta["traceback"]
+    assert err.meta["causes"] == []
     assert store.snapshot().exists("error:bad")
+
+
+async def test_a_soft_error_records_the_uniform_meta_shape():
+    async def soft(input, view):
+        return Result(status=Status.ERROR, error="declined")
+
+    system = System([as_node(soft, name="soft", reads="in")])
+    run = await ReactiveExecutor().run(system, Store(), seed=[Fact(tag="in")])
+    assert run.reason == "error"
+    err = run.steps[-1].errors[0]
+    assert err.value == "declined"
+    assert err.meta == {"type": None, "traceback": None, "causes": []}
 
 
 async def test_halt_on_error_false_keeps_the_rest_running():

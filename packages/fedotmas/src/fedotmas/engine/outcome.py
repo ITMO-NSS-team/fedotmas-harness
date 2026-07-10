@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -8,9 +9,17 @@ from fedotmas.engine.report import Run, StepReport
 
 
 class RunError(RuntimeError):
-    """Raised by Outcome.unwrap() when a run did not finish clean. Failure stays data on the
-    Outcome (`.reason`, `.errors`); this is the opt-in escalation for call sites that want the
-    value or an exception, not a None to check by hand."""
+    """A run did not finish clean: raised by Outcome.unwrap() and by the nest/loop boundary
+    when an inner run breaks its contract. Failure stays data — `errors` holds the run's error
+    facts, `reason` how it ended — so an executor catching it records a structured error fact
+    (the carried facts nest as meta["causes"]) instead of a flattened string."""
+
+    def __init__(
+        self, message: str, *, errors: Sequence[Fact] = (), reason: str = "error"
+    ) -> None:
+        super().__init__(message)
+        self.errors = list(errors)
+        self.reason = reason
 
 
 @dataclass
@@ -41,6 +50,8 @@ class Outcome:
 
     @property
     def errors(self) -> list[Fact]:
+        """Every error fact this run recorded. A nest/loop failure is one fact whose
+        meta["causes"] nests the inner facts' dumps, recursively — the whole failure tree."""
         return [e for s in self.run.steps for e in s.errors]
 
     @property
@@ -59,14 +70,18 @@ class Outcome:
         """Return the produced value, or raise RunError if the run did not finish clean. The
         complement to reading `.value`/`.ok` by hand: use it when a failed run should be an
         exception (a script, a test) rather than a None to branch on. The error names the
-        reason and the failed nodes."""
+        reason and the failed nodes and carries their error facts."""
         if self.ok:
             return self.value
         detail = (
             "; ".join(f"{e.producer}: {e.value}" for e in self.errors)
             or "no output produced"
         )
-        raise RunError(f"run did not succeed (reason={self.reason!r}): {detail}")
+        raise RunError(
+            f"run did not succeed (reason={self.reason!r}): {detail}",
+            errors=self.errors,
+            reason=self.reason,
+        )
 
     def __repr__(self) -> str:
         value = repr(self.value)

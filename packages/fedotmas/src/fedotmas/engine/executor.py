@@ -3,9 +3,10 @@ from __future__ import annotations
 import asyncio
 import traceback
 from collections.abc import AsyncIterator, Iterable, Sequence
-from typing import Literal, NamedTuple, Protocol
+from typing import Any, Literal, NamedTuple, Protocol
 
 from fedotmas.engine.contract import Fact, Key, Node, Status, View
+from fedotmas.engine.outcome import RunError
 from fedotmas.engine.plugin import Plugin, PluginDispatcher
 from fedotmas.engine.policy import FireAll
 from fedotmas.engine.report import Run, StepReport
@@ -84,12 +85,16 @@ def _ready(
 
 
 def _error_fact(name: str, message: str, step: int, exc: Exception | None) -> Fact:
-    meta = {}
+    """The uniform error record: meta always carries `type`, `traceback` and `causes`. A
+    RunError (a failed inner run) adds `reason` and dumps its facts into causes — each dump
+    nests its own, so a deep failure arrives as a tree, not a flattened string."""
+    meta: dict[str, Any] = {"type": None, "traceback": None, "causes": []}
     if exc is not None:
-        meta = {
-            "type": type(exc).__name__,
-            "traceback": "".join(traceback.format_exception(exc)),
-        }
+        meta["type"] = type(exc).__name__
+        meta["traceback"] = "".join(traceback.format_exception(exc))
+    if isinstance(exc, RunError):
+        meta["reason"] = exc.reason
+        meta["causes"] = [e.model_dump() for e in exc.errors]
     return Fact(tag=f"error:{name}", value=message, producer=name, step=step, meta=meta)
 
 

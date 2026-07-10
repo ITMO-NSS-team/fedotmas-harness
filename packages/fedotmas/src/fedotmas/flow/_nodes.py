@@ -11,6 +11,7 @@ from fedotmas._condition import Predicate, spec_of
 from fedotmas.engine.contract import Fact, Kind, Node, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.node import as_node
+from fedotmas.engine.outcome import Outcome, RunError
 from fedotmas.engine.plugin import PluginDispatcher
 from fedotmas.engine.report import Run
 from fedotmas.engine.store import Store
@@ -173,7 +174,8 @@ def _nest_node(
 ) -> Node:
     """Run a whole sub-system as one node: seed its own inner store with the outer input, run
     until the inner output exists (or `until`, if given), write it back as one fact. The interior
-    stays opaque to the outer engine; a failure surfaces as this node's error. `budget` is the
+    stays opaque to the outer engine; a failure surfaces as this node's error fact, the inner
+    errors nested as its causes. `budget` is the
     inner superstep cap folded into the terminate here, stamped on the Card so the round-trip
     restores the same bound. `plugins` is the nested dispatcher face: observers follow the
     inner run, interceptors apply to this node as a whole, not again to every inner node."""
@@ -204,18 +206,22 @@ def _nest_node(
 
 
 def _inner_guard(run: Run, out: str, what: str) -> None:
-    """Surface an inner run's failure as this node's failure, so the outer engine records it
-    as an error fact instead of silently writing None. Only a strict inner system ends with
+    """Surface an inner run's failure as this node's failure: RunError carries the inner
+    error facts across the boundary, so the outer executor records them as this node's
+    meta["causes"] tree instead of a flattened string. Only a strict inner system ends with
     reason "error"; a lenient one (halt_on_error=False) that still produced `out` passes,
     its recorded errors noise by its own declaration."""
+    inner = Outcome(run, out)
     if run.reason == "error":
-        msgs = "; ".join(
-            f"{e.producer}: {e.value}" for s in run.steps for e in s.errors
+        msgs = "; ".join(f"{e.producer}: {e.value}" for e in inner.errors)
+        raise RunError(
+            f"{what}: inner system failed ({msgs})", errors=inner.errors, reason="error"
         )
-        raise RuntimeError(f"{what}: inner system failed ({msgs})")
     if not run.view.exists(out):
-        raise RuntimeError(
-            f"{what}: inner system stopped ({run.reason}) before producing {out!r}"
+        raise RunError(
+            f"{what}: inner system stopped ({run.reason}) before producing {out!r}",
+            errors=inner.errors,
+            reason=inner.reason,
         )
 
 

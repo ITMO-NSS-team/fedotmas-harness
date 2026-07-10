@@ -111,6 +111,24 @@ async def test_outcome_can_reach_the_goal_past_an_error():
     assert out.errors
 
 
+async def test_a_repair_rule_reacts_to_another_rules_error():
+    async def flaky(value):
+        raise ValueError("no plan")
+
+    async def repair(msg):
+        return f"fallback after {msg}"
+
+    board = blackboard(
+        Rule("planner", fn=flaky, reads="task", writes="out"),
+        Rule("medic", fn=repair, reads="error:planner", writes="out"),
+        halt_on_error=False,
+    )
+    out = await board.run({"task": "go"}, goal="out")
+    assert out.value == "fallback after no plan"
+    assert out.reason == "goal"
+    assert not out.ok
+
+
 async def test_a_board_policy_holds_an_auction_each_superstep():
     def says(name):
         async def fn(value, view):
