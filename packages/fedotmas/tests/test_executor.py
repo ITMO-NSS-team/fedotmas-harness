@@ -167,9 +167,10 @@ async def test_halt_on_error_ends_the_run_with_the_traceback():
 
 
 async def test_halt_on_error_false_keeps_the_rest_running():
-    run = await gather(action(boom), action(fine)).run(
-        "x", halt_on_error=False, budget=5
+    lenient = gather(action(boom), action(fine)).system(
+        entry="in", out="out", halt_on_error=False
     )
+    run = await lenient.run({"in": "x"}, budget=5)
     assert not run.ok
     assert run.reason == "stalled"
     assert [e.tag.startswith("error:boom") for e in run.errors] == [True]

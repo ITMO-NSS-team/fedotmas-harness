@@ -20,7 +20,7 @@ class Outcome:
     it), `ok` is "finished clean and produced the output", and `reason` says how the run
     ended: "goal" (output produced), "error" (a node failed, see `errors`), "budget" (step
     cap hit first), or "stalled" (the system went quiet without producing the output: a
-    wiring gap). Under halt_on_error=False a run can end reason "goal" with `errors`
+    wiring gap). A lenient system (halt_on_error=False) can end reason "goal" with `errors`
     non-empty; `ok` stays False, it never overlooks an error.
     """
 

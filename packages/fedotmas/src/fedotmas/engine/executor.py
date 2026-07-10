@@ -7,7 +7,7 @@ from typing import Literal, NamedTuple, Protocol
 
 from fedotmas.engine.contract import Fact, Key, Node, Status, View
 from fedotmas.engine.plugin import Plugin, PluginDispatcher
-from fedotmas.engine.policy import FireAll, Policy
+from fedotmas.engine.policy import FireAll
 from fedotmas.engine.report import Run, StepReport
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
@@ -22,7 +22,6 @@ class Executor(Protocol):
         *,
         seed: Iterable[Fact] = (),
         terminate: Terminate | None = None,
-        policy: Policy | None = None,
         plugins: Sequence[Plugin] | PluginDispatcher = (),
     ) -> AsyncIterator[StepReport]: ...
 
@@ -33,7 +32,6 @@ class Executor(Protocol):
         *,
         seed: Iterable[Fact] = (),
         terminate: Terminate | None = None,
-        policy: Policy | None = None,
         plugins: Sequence[Plugin] | PluginDispatcher = (),
     ) -> Run: ...
 
@@ -96,15 +94,11 @@ def _error_fact(name: str, message: str, step: int, exc: Exception | None) -> Fa
 
 
 class ReactiveExecutor:
-    """The superstep loop. `halt_on_error` (default True) ends the run on the first failed
-    node; with False the error is still committed as a fact and reported, but the rest of the
-    system keeps running and the Run carries Status.ERROR at the end. `plugins` accepts the
-    raw list or an already-bound PluginDispatcher; `after_run` fires when a run completes —
-    for `stream`, that is the natural end of the iteration, so an abandoned stream fires no
-    end hook."""
-
-    def __init__(self, *, halt_on_error: bool = True) -> None:
-        self._halt = halt_on_error
+    """The superstep loop. The selection policy and the error discipline come from the system
+    itself (`system.policy`, `system.halt_on_error`), so they hold wherever it runs —
+    top-level or inside nest/loop. `plugins` accepts the raw list or an already-bound
+    PluginDispatcher; `after_run` fires when a run completes — for `stream`, that is the
+    natural end of the iteration, so an abandoned stream fires no end hook."""
 
     async def stream(
         self,
@@ -113,17 +107,16 @@ class ReactiveExecutor:
         *,
         seed: Iterable[Fact] = (),
         terminate: Terminate | None = None,
-        policy: Policy | None = None,
         plugins: Sequence[Plugin] | PluginDispatcher = (),
     ) -> AsyncIterator[StepReport]:
         dispatcher = PluginDispatcher.of(plugins)
         steps: list[StepReport] = []
-        async for report in self._steps(
-            system, store, seed, terminate, policy, dispatcher
-        ):
+        async for report in self._steps(system, store, seed, terminate, dispatcher):
             steps.append(report)
             yield report
-        await dispatcher.after_run(self._finish(steps, store, dispatcher.scope))
+        await dispatcher.after_run(
+            self._finish(steps, store, dispatcher.scope, system.halt_on_error)
+        )
 
     async def run(
         self,
@@ -132,17 +125,14 @@ class ReactiveExecutor:
         *,
         seed: Iterable[Fact] = (),
         terminate: Terminate | None = None,
-        policy: Policy | None = None,
         plugins: Sequence[Plugin] | PluginDispatcher = (),
     ) -> Run:
         dispatcher = PluginDispatcher.of(plugins)
         steps = [
             report
-            async for report in self._steps(
-                system, store, seed, terminate, policy, dispatcher
-            )
+            async for report in self._steps(system, store, seed, terminate, dispatcher)
         ]
-        run = self._finish(steps, store, dispatcher.scope)
+        run = self._finish(steps, store, dispatcher.scope, system.halt_on_error)
         await dispatcher.after_run(run)
         return run
 
@@ -152,10 +142,9 @@ class ReactiveExecutor:
         store: Store,
         seed: Iterable[Fact],
         terminate: Terminate | None,
-        policy: Policy | None,
         dispatcher: PluginDispatcher,
     ) -> AsyncIterator[StepReport]:
-        active = policy or FireAll()
+        active = system.policy or FireAll()
         scope = dispatcher.scope
         store.commit(_seed(seed, store.next_step() - 1))
         await dispatcher.before_run(system, store.snapshot())
@@ -205,18 +194,18 @@ class ReactiveExecutor:
             )
             await dispatcher.after_step(report)
             yield report
-            if errors and self._halt:
+            if errors and system.halt_on_error:
                 return
             if terminate is not None and terminate.done(post, report):
                 return
             index += 1
 
     def _finish(
-        self, steps: list[StepReport], store: Store, scope: tuple[str, ...]
+        self, steps: list[StepReport], store: Store, scope: tuple[str, ...], halt: bool
     ) -> Run:
         status = Status.ERROR if any(s.errors for s in steps) else Status.OK
         last = steps[-1]
-        if self._halt and last.errors:
+        if halt and last.errors:
             reason: Literal["terminate", "quiescence", "error"] = "error"
         elif not last.fired:
             reason = "quiescence"

@@ -53,17 +53,20 @@ class Flow(Generic[A, B]):
         out: str,
         bind: Mapping[str, Any] | None = None,
         plugins: Sequence[Plugin] | PluginDispatcher = (),
+        policy: Policy | None = None,
+        halt_on_error: bool = True,
     ) -> System:
         """Compile to a runnable System. `bind` is the run-scoped binding map threaded to every
         node's builder (e.g. a default backend under "llm"); a node that needs a binding nobody
         supplied fails here, not mid-run. `plugins` are baked into nested boundaries at compile:
         nest and loop nodes capture the observer face for their inner runs, which is why plugins
-        given only at run time cannot reach inside an already-compiled system."""
+        given only at run time cannot reach inside an already-compiled system. `policy` and
+        `halt_on_error` become the compiled system's own discipline (see System)."""
         ctx = Ctx(bindings=bind or {}, plugins=PluginDispatcher.of(plugins))
         nodes, last = self._build(ctx, entry)
         if last != out:
             nodes = [*nodes, _alias_node(last, out)]
-        return System(nodes)
+        return System(nodes, policy=policy, halt_on_error=halt_on_error)
 
     async def run(
         self,
@@ -71,26 +74,19 @@ class Flow(Generic[A, B]):
         *,
         bind: Mapping[str, Any] | None = None,
         budget: int | None = 100,
-        policy: Policy | None = None,
-        halt_on_error: bool = True,
         plugins: Sequence[Plugin] = (),
     ) -> Outcome:
         """Compile and execute the flow on one input. The store, the seed fact, and the
         terminate condition (output produced, capped by `budget` supersteps; the default 100
         is a runaway guard, None lifts the cap) are derived, so the caller holds no tags.
-        `halt_on_error=False` keeps the run going past a failed node; the error still lands
-        in `.errors` and `.ok` stays False. Returns an Outcome: `.value`, `.ok`, `.reason`,
-        `.errors`, and the full `.steps` trace.
+        A selection policy or a lenient error discipline is the system's property: set it
+        through .system(). Returns an Outcome: `.value`, `.ok`, `.reason`, `.errors`, and the
+        full `.steps` trace.
         """
         dispatcher = PluginDispatcher.of(plugins)
         system = self.system(entry="in", out="out", bind=bind, plugins=dispatcher)
         return await system.run(
-            {"in": value},
-            goal="out",
-            budget=budget,
-            policy=policy,
-            halt_on_error=halt_on_error,
-            plugins=dispatcher,
+            {"in": value}, goal="out", budget=budget, plugins=dispatcher
         )
 
     async def stream(
@@ -99,20 +95,13 @@ class Flow(Generic[A, B]):
         *,
         bind: Mapping[str, Any] | None = None,
         budget: int | None = 100,
-        policy: Policy | None = None,
-        halt_on_error: bool = True,
         plugins: Sequence[Plugin] = (),
     ) -> AsyncIterator[StepReport]:
         """The streaming form of .run: yields each StepReport as the run unfolds."""
         dispatcher = PluginDispatcher.of(plugins)
         system = self.system(entry="in", out="out", bind=bind, plugins=dispatcher)
         async for report in system.stream(
-            {"in": value},
-            goal="out",
-            budget=budget,
-            policy=policy,
-            halt_on_error=halt_on_error,
-            plugins=dispatcher,
+            {"in": value}, goal="out", budget=budget, plugins=dispatcher
         ):
             yield report
 
@@ -384,10 +373,12 @@ def nest(
     flow's run-scoped bindings as its fallback; a System is already compiled, so they do not
     reach inside it. The inner run is the outer node's single superstep, so the
     outer budget cannot interrupt it; `budget` caps the inner supersteps instead (the default
-    100 is a runaway guard, None lifts it). The inner run always halts on its first error and
-    the failure surfaces as this node's error fact; the outer halt_on_error then decides
-    whether the rest of the system continues. Named nest, not embed, to avoid the embeddings
-    reading.
+    100 is a runaway guard, None lifts it). The inner system runs under its own discipline:
+    a strict one (the default) halts on its first error and the failure surfaces as this
+    node's error fact, while a lenient one (halt_on_error=False) that still reaches `out`
+    counts as success, its errors observable through on_error. The outer halt_on_error then
+    decides whether the rest of the system continues. Named nest, not embed, to avoid the
+    embeddings reading.
 
     Example:
         research = nest(board, entry="topic", out="report", until=Goal("report"))

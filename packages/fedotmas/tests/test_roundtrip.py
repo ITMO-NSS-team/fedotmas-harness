@@ -8,6 +8,7 @@ from _helpers import bump, count, double, gate, pick_a, pick_b, score, triple, u
 from fedotmas import Rule, action, blackboard, branch, gather, nest
 from fedotmas.engine.contract import Fact
 from fedotmas.engine.executor import ReactiveExecutor
+from fedotmas.engine.policy import AuctionSelect
 from fedotmas.engine.store import Store
 from fedotmas.engine.terminate import Budget, Goal
 from fedotmas.serialize import Deps, ReconstructError, from_blueprint, to_blueprint
@@ -159,3 +160,21 @@ async def test_roundtrip_loop_over_branch_with_a_nested_loop():
     assert to_blueprint(rebuilt) == bp
     v = {"n": 4, "tries": 0, "sub": 0, "mode": "fast", "solved": False}
     assert await _out(rebuilt, "in", v, "out") == await _out(system, "in", v, "out")
+
+
+async def test_roundtrip_carries_halt_on_error():
+    system = action(double).system(entry="in", out="out", halt_on_error=False)
+    bp = to_blueprint(system)
+    rebuilt = from_blueprint(bp, Deps(bodies={"double": double}))
+    assert rebuilt.halt_on_error is False
+    assert to_blueprint(rebuilt) == bp
+
+
+def test_a_policy_marked_blueprint_refuses_to_rebuild():
+    board = blackboard(
+        Rule("score", score, reads="seed", writes="out"),
+        policy=AuctionSelect(key=lambda n, v: 1.0),
+    )
+    bp = to_blueprint(board.system)
+    with pytest.raises(ReconstructError, match="policy"):
+        from_blueprint(bp, Deps(bodies={"score": score}))

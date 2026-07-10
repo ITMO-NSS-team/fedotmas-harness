@@ -54,8 +54,15 @@ def from_blueprint(blueprint: Blueprint, deps: Deps) -> System:
     name; a declarative control spec (state-key until/select) is recompiled to its predicate.
     The round-trip is the contract: `to_blueprint(from_blueprint(bp, deps)) == bp` and the
     rebuilt system runs to the same output. A node the blueprint could only mark (a callable
-    until/select/when, an unknown kind) raises ReconstructError."""
-    return System([_node(n, deps) for n in blueprint.nodes])
+    until/select/when, an unknown kind, a policy strategy) raises ReconstructError."""
+    if blueprint.policy is not None:
+        raise ReconstructError(
+            f"policy {blueprint.policy!r} is an opaque strategy the blueprint cannot rebuild"
+        )
+    return System(
+        [_node(n, deps) for n in blueprint.nodes],
+        halt_on_error=blueprint.halt_on_error,
+    )
 
 
 def _node(n: BlueprintNode, deps: Deps) -> Node:

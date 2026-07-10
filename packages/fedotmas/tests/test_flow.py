@@ -13,7 +13,7 @@ from fedotmas import (
     gather,
     nest,
 )
-from fedotmas.engine import Fact, Goal, ReactiveExecutor, Store
+from fedotmas.engine import AuctionSelect, Fact, Goal, ReactiveExecutor, Store
 from pydantic import BaseModel
 
 
@@ -324,3 +324,48 @@ async def test_nest_wraps_a_mutually_recursive_board_as_one_node():
     out = await nest(haggle, entry="ask", out="deal", budget=30).run(100.0)
     assert out.ok
     assert out.value == {"price": 81.0, "rounds": 3}
+
+
+async def test_a_board_policy_survives_nest():
+    def says(name):
+        async def fn(value, view):
+            return name
+
+        return fn
+
+    bids = {"hi": 0.9, "lo": 0.1}
+    board = blackboard(
+        Rule("hi", fn=says("hi"), reads="seed", writes="pick"),
+        Rule("lo", fn=says("lo"), reads="seed", writes="pick"),
+        policy=AuctionSelect(key=lambda n, v: bids[n.name]),
+    )
+    run = await nest(board, entry="seed", out="pick").run(1)
+    assert run.ok
+    assert run.value == "hi"
+
+
+async def test_a_lenient_board_inside_nest_succeeds_past_a_failing_rule():
+    async def boom(value, view):
+        raise RuntimeError("boom")
+
+    board = blackboard(
+        Rule("ok", fn=double, reads="seed", writes="answer"),
+        Rule("bad", fn=boom, reads="seed", writes="other"),
+        halt_on_error=False,
+    )
+    run = await nest(board, entry="seed", out="answer").run(3)
+    assert run.ok
+    assert run.value == 6
+
+
+async def test_a_strict_board_inside_nest_fails_on_the_same_rule():
+    async def boom(value, view):
+        raise RuntimeError("boom")
+
+    board = blackboard(
+        Rule("ok", fn=double, reads="seed", writes="answer"),
+        Rule("bad", fn=boom, reads="seed", writes="other"),
+    )
+    run = await nest(board, entry="seed", out="answer").run(3)
+    assert not run.ok
+    assert run.errors

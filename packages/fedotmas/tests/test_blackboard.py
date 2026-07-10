@@ -2,7 +2,7 @@
 
 import pytest
 from fedotmas import Condition, Rule, blackboard
-from fedotmas.engine import Fact, Goal, ReactiveExecutor, Store
+from fedotmas.engine import AuctionSelect, Fact, Goal, ReactiveExecutor, Store
 
 
 async def bump(value, view):
@@ -103,11 +103,31 @@ async def test_outcome_can_reach_the_goal_past_an_error():
     board = blackboard(
         Rule("ok", fn=mark, reads="seed", writes="goal"),
         Rule("bad", fn=fail, reads="seed", writes="other"),
+        halt_on_error=False,
     )
-    out = await board.run({"seed": 1}, goal="goal", halt_on_error=False)
+    out = await board.run({"seed": 1}, goal="goal")
     assert out.reason == "goal"
     assert not out.ok
     assert out.errors
+
+
+async def test_a_board_policy_holds_an_auction_each_superstep():
+    def says(name):
+        async def fn(value, view):
+            return name
+
+        return fn
+
+    bids = {"hi": 0.9, "lo": 0.1}
+    board = blackboard(
+        Rule("hi", fn=says("hi"), reads="seed", writes="out"),
+        Rule("lo", fn=says("lo"), reads="seed", writes="out"),
+        policy=AuctionSelect(key=lambda n, v: bids[n.name]),
+    )
+    out = await board.run({"seed": 1}, goal="out")
+    assert out.ok
+    assert out.value == "hi"
+    assert [s.fired for s in out.steps if s.fired] == [["hi"]]
 
 
 def test_meta_rides_to_the_card():

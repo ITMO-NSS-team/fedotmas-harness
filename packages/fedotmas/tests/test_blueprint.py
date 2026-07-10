@@ -16,6 +16,7 @@ from _helpers import (
     upper,
 )
 from fedotmas import Rule, action, blackboard, branch, gather, nest
+from fedotmas.engine.policy import AuctionSelect
 from fedotmas.serialize import Blueprint, to_blueprint, to_graph
 from fedotmas.engine.store import matches
 
@@ -95,6 +96,19 @@ def test_flow_over_board_recurses():
     assert nestnode.inner is not None
     assert node(nestnode.inner, "count").kind == "rule"
     assert has_edge(bp, "upper#1", "nest#2")
+
+
+def test_blueprint_carries_the_system_discipline():
+    rules = (Rule("count", count, reads="topic", writes="report"),)
+    plain = to_blueprint(blackboard(*rules).system)
+    assert plain.policy is None
+    assert plain.halt_on_error is True
+    board = blackboard(
+        *rules, policy=AuctionSelect(key=lambda n, v: 1.0), halt_on_error=False
+    )
+    bp = to_blueprint(board.system)
+    assert bp.policy == "AuctionSelect"
+    assert bp.halt_on_error is False
 
 
 def test_blueprint_is_json_clean():

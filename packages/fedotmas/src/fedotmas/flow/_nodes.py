@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 from fedotmas._addressing import Branch, Loop, alias, build_id
 from fedotmas._condition import Predicate, spec_of
-from fedotmas.engine.contract import Fact, Kind, Node, Result, Status, View
+from fedotmas.engine.contract import Fact, Kind, Node, Result, View
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.node import as_node
 from fedotmas.engine.plugin import PluginDispatcher
@@ -205,8 +205,10 @@ def _nest_node(
 
 def _inner_guard(run: Run, out: str, what: str) -> None:
     """Surface an inner run's failure as this node's failure, so the outer engine records it
-    as an error fact instead of silently writing None."""
-    if run.status is Status.ERROR:
+    as an error fact instead of silently writing None. Only a strict inner system ends with
+    reason "error"; a lenient one (halt_on_error=False) that still produced `out` passes,
+    its recorded errors noise by its own declaration."""
+    if run.reason == "error":
         msgs = "; ".join(
             f"{e.producer}: {e.value}" for s in run.steps for e in s.errors
         )

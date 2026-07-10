@@ -33,10 +33,12 @@ def open_task(v: View) -> bool:
 
 
 async def main() -> None:
+    # the auction is the system's own discipline, so it holds wherever the system runs
     system = System(
         nodes=[
             as_node(worker(n), name=n, reads="task", trigger=open_task) for n in BIDS
-        ]
+        ],
+        policy=AuctionSelect(key=lambda a, v: BIDS[a.name]),
     )
     store = Store()
     stream = ReactiveExecutor().stream(
@@ -44,7 +46,6 @@ async def main() -> None:
         store,
         seed=[Fact(tag="task", value="haul cargo")],
         terminate=Goal(lambda v: v.exists("result")),
-        policy=AuctionSelect(key=lambda a, v: BIDS[a.name]),
     )
     async for r in stream:
         print(f"step {r.step}: {r.fired} -> {[f.tag for f in r.writes]}")
