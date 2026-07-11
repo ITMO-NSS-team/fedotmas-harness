@@ -325,13 +325,13 @@ class _Nest(Flow[A, B]):
         *,
         entry: str,
         out: str,
-        until: Terminate | None,
+        terminate: Sequence[Terminate],
         budget: int | None,
     ) -> None:
         self._target = target
         self._entry = entry
         self._out = out
-        self._until = until
+        self._terminate = terminate
         self._budget = budget
 
     def _build(self, ctx: Ctx, entry: str) -> tuple[list[Node], str]:
@@ -353,7 +353,7 @@ class _Nest(Flow[A, B]):
             inner_entry=inner_entry,
             inner_out=inner_out,
             budget=self._budget,
-            until=self._until,
+            terminate=self._terminate,
             plugins=inner,
         )
         return [nest], name
@@ -364,7 +364,7 @@ def nest(
     *,
     entry: str,
     out: str,
-    until: Terminate | None = None,
+    terminate: Sequence[Terminate] = (),
     budget: int | None = 100,
 ) -> Flow[A, B]:
     """Run a whole sub-system as one typed arrow node: its own inner store, run to a goal,
@@ -383,7 +383,7 @@ def nest(
     embed, to avoid the embeddings reading.
 
     Example:
-        research = nest(board, entry="topic", out="report", until=Goal("report"))
+        research = nest(board, entry="topic", out="report")
         pipeline = plan + research + write
     """
-    return _Nest(target, entry=entry, out=out, until=until, budget=budget)
+    return _Nest(target, entry=entry, out=out, terminate=terminate, budget=budget)

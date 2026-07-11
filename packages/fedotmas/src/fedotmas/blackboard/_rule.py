@@ -12,7 +12,7 @@ from fedotmas._condition import (
     view_predicate,
 )
 from fedotmas._inject import bind_async
-from fedotmas.engine.contract import Fact, Kind, Node, Result, View
+from fedotmas.engine.contract import Fact, Kind, Node, Result, View, patterns
 from fedotmas.engine.node import as_node, system_step
 from fedotmas.engine.plugin import PluginDispatcher
 from fedotmas.engine.system import Compilable, System
@@ -87,7 +87,7 @@ class Rule:
     def _check_common(self) -> None:
         if not self.writes:
             raise ValueError(f"rule {self.name!r}: writes= is required")
-        if len(self.reads.split()) > 1:
+        if len(patterns(self.reads)) > 1:
             raise ValueError(
                 f"rule {self.name!r}: reads= names one fact tag; condition on several "
                 "facts with when= and read them off the view"
@@ -97,7 +97,8 @@ class Rule:
             return
         if isinstance(when, str) or not when or any(t in ("", "!") for t in when):
             raise ValueError(
-                f"rule {self.name!r}: when= takes a sequence of non-empty tags"
+                f"rule {self.name!r}: when= takes a sequence of non-empty tags — "
+                '["x"] means the fact exists; for a truthy value use Condition(key="x")'
             )
         clash = {t for t in when if not t.startswith("!")} & {
             t[1:] for t in when if t.startswith("!")

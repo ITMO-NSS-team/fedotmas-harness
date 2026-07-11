@@ -62,7 +62,7 @@ async def test_positive_when_tags_join_the_refire_identity():
         board.system(),
         store,
         seed=[Fact(tag="sig", value=1)],
-        terminate=Goal(lambda v: v.count("out") >= 2),
+        terminate=[Goal(lambda v: v.count("out") >= 2)],
     ):
         if not fed:
             store.commit([Fact(tag="sig", value=2, producer="feeder", step=50)])

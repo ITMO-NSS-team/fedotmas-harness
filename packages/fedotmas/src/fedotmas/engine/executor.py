@@ -3,9 +3,17 @@ from __future__ import annotations
 import asyncio
 import traceback
 from collections.abc import AsyncIterator, Iterable, Sequence
-from typing import Any, Literal, NamedTuple, Protocol
+from typing import Any, NamedTuple
 
-from fedotmas.engine.contract import Fact, Key, Node, Status, View
+from fedotmas.engine.contract import (
+    ERROR_CHANNEL,
+    Fact,
+    Key,
+    Node,
+    Status,
+    View,
+    patterns,
+)
 from fedotmas.engine.outcome import RunError
 from fedotmas.engine.plugin import Plugin, PluginDispatcher
 from fedotmas.engine.policy import FireAll
@@ -13,28 +21,6 @@ from fedotmas.engine.report import Run, StepReport
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
 from fedotmas.engine.terminate import Terminate
-
-
-class Executor(Protocol):
-    def stream(
-        self,
-        system: System,
-        store: Store,
-        *,
-        seed: Iterable[Fact] = (),
-        terminate: Terminate | None = None,
-        plugins: Sequence[Plugin] | PluginDispatcher = (),
-    ) -> AsyncIterator[StepReport]: ...
-
-    async def run(
-        self,
-        system: System,
-        store: Store,
-        *,
-        seed: Iterable[Fact] = (),
-        terminate: Terminate | None = None,
-        plugins: Sequence[Plugin] | PluginDispatcher = (),
-    ) -> Run: ...
 
 
 def _stamp(facts: Iterable[Fact], producer: str, step: int) -> list[Fact]:
@@ -57,7 +43,7 @@ def _seed(facts: Iterable[Fact], step: int) -> list[Fact]:
 
 
 def _matched(view: View, reads: str) -> list[Fact]:
-    return [f for pattern in reads.split() for f in view.query(pattern)]
+    return [f for pattern in patterns(reads) for f in view.query(pattern)]
 
 
 class _Armed(NamedTuple):
@@ -95,7 +81,9 @@ def _error_fact(name: str, message: str, step: int, exc: Exception | None) -> Fa
     if isinstance(exc, RunError):
         meta["reason"] = exc.reason
         meta["causes"] = [e.model_dump() for e in exc.errors]
-    return Fact(tag=f"error:{name}", value=message, producer=name, step=step, meta=meta)
+    return Fact(
+        tag=ERROR_CHANNEL + name, value=message, producer=name, step=step, meta=meta
+    )
 
 
 class ReactiveExecutor:
@@ -111,7 +99,7 @@ class ReactiveExecutor:
         store: Store,
         *,
         seed: Iterable[Fact] = (),
-        terminate: Terminate | None = None,
+        terminate: Sequence[Terminate] = (),
         plugins: Sequence[Plugin] | PluginDispatcher = (),
     ) -> AsyncIterator[StepReport]:
         dispatcher = PluginDispatcher.of(plugins)
@@ -120,7 +108,9 @@ class ReactiveExecutor:
             steps.append(report)
             yield report
         await dispatcher.after_run(
-            self._finish(steps, store, dispatcher.scope, system.halt_on_error)
+            self._finish(
+                steps, store, dispatcher.scope, system.halt_on_error, terminate
+            )
         )
 
     async def run(
@@ -129,7 +119,7 @@ class ReactiveExecutor:
         store: Store,
         *,
         seed: Iterable[Fact] = (),
-        terminate: Terminate | None = None,
+        terminate: Sequence[Terminate] = (),
         plugins: Sequence[Plugin] | PluginDispatcher = (),
     ) -> Run:
         dispatcher = PluginDispatcher.of(plugins)
@@ -137,7 +127,9 @@ class ReactiveExecutor:
             report
             async for report in self._steps(system, store, seed, terminate, dispatcher)
         ]
-        run = self._finish(steps, store, dispatcher.scope, system.halt_on_error)
+        run = self._finish(
+            steps, store, dispatcher.scope, system.halt_on_error, terminate
+        )
         await dispatcher.after_run(run)
         return run
 
@@ -146,7 +138,7 @@ class ReactiveExecutor:
         system: System,
         store: Store,
         seed: Iterable[Fact],
-        terminate: Terminate | None,
+        terminate: Sequence[Terminate],
         dispatcher: PluginDispatcher,
     ) -> AsyncIterator[StepReport]:
         active = system.policy or FireAll()
@@ -201,19 +193,29 @@ class ReactiveExecutor:
             yield report
             if errors and system.halt_on_error:
                 return
-            if terminate is not None and terminate.done(post, report):
+            if any(t.done(post, report) for t in terminate):
                 return
             index += 1
 
     def _finish(
-        self, steps: list[StepReport], store: Store, scope: tuple[str, ...], halt: bool
+        self,
+        steps: list[StepReport],
+        store: Store,
+        scope: tuple[str, ...],
+        halt: bool,
+        terminate: Sequence[Terminate],
     ) -> Run:
+        """Name how the run ended. "error" and "quiescence" are the engine's own outcomes
+        (halted on a failure / nothing armed); otherwise the run ended on a terminate
+        condition, and re-consulting the list on the final report names the first one that
+        holds — Run.reason is its lowercased class name ("goal", "budget", ...)."""
         status = Status.ERROR if any(s.errors for s in steps) else Status.OK
         last = steps[-1]
         if halt and last.errors:
-            reason: Literal["terminate", "quiescence", "error"] = "error"
+            reason = "error"
         elif not last.fired:
             reason = "quiescence"
         else:
-            reason = "terminate"
+            hit = next(t for t in terminate if t.done(last.view, last))
+            reason = type(hit).__name__.lower()
         return Run(status, steps, store.snapshot(), reason, scope)

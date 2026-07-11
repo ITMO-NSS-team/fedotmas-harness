@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Literal
 
 from fedotmas.engine.contract import Fact, Status, View
 
@@ -25,8 +24,12 @@ class StepReport:
 
 @dataclass
 class Run:
+    """A finished run: the trace, the final view, and `reason` — "error" or "quiescence"
+    for the engine's own endings, else the label of the terminate condition that ended it
+    ("goal", "budget", a custom class name lowercased)."""
+
     status: Status
     steps: list[StepReport]
     view: View
-    reason: Literal["terminate", "quiescence", "error"] = "terminate"
+    reason: str = "quiescence"
     scope: tuple[str, ...] = ()

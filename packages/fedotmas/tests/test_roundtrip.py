@@ -20,7 +20,7 @@ async def _out(system, seed_tag, value, goal):
         system,
         Store(),
         seed=[Fact(tag=seed_tag, value=value)],
-        terminate=Goal(lambda v: v.exists(goal)) | Budget(50),
+        terminate=[Goal(goal), Budget(50)],
     )
     return run.view.value(goal)
 

@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
-from fedotmas.engine.contract import Card, Fact, Kind, Node, Result, View
+from fedotmas.engine.contract import Card, Fact, Kind, Node, Result, View, patterns
 from fedotmas.engine.executor import ReactiveExecutor
 from fedotmas.engine.outcome import Outcome, RunError
 from fedotmas.engine.plugin import PluginDispatcher
 from fedotmas.engine.report import Run
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
-from fedotmas.engine.terminate import Budget, Goal, Terminate, any_of
+from fedotmas.engine.terminate import Budget, Goal, Terminate
 
 Invoke = Callable[[Any, View], Awaitable[Result]]
 Trigger = Callable[[View], bool]
@@ -51,7 +51,7 @@ class _FnNode:
             description=self._fn.__doc__ or "",
             meta=self._meta,
             kind=self._kind,
-            reads=self.reads.split(),
+            reads=patterns(self.reads),
             writes=self._writes,
             params=self._params,
             system=self._system,
@@ -84,8 +84,8 @@ def as_node(
     if trigger is not None:
         trig = trigger
     elif reads:
-        patterns = reads.split()
-        trig = lambda view: all(view.exists(p) for p in patterns)  # noqa: E731
+        pats = patterns(reads)
+        trig = lambda view: all(view.exists(p) for p in pats)  # noqa: E731
     else:
         trig = lambda view: False  # noqa: E731
     return _FnNode(
@@ -107,19 +107,20 @@ def system_step(
     entry: str,
     out: str,
     budget: int | None = 100,
-    until: Terminate | None = None,
+    terminate: Sequence[Terminate] = (),
     plugins: PluginDispatcher | None = None,
     label: str = "nest",
 ) -> Callable[[Any], Awaitable[Any]]:
     """Compile a whole System into one async step — the recursion primitive both composition
     surfaces build on (a flow's nest node, a board's nest rule). Each call seeds a fresh inner
-    store with the value under `entry`, runs until `out` exists (or `until`; `budget` caps the
-    inner supersteps, None lifts it) and returns the value of `out`. A broken inner run raises
-    RunError through inner_guard, with `label` naming this boundary in the message."""
+    store with the value under `entry`, runs until `out` exists (`terminate` replaces that
+    default; `budget` caps the inner supersteps, None lifts it) and returns the value of
+    `out`. A broken inner run raises RunError through inner_guard, with `label` naming this
+    boundary in the message."""
     dispatcher = plugins or PluginDispatcher()
-    term: Terminate = until or Goal(lambda v: v.exists(out))
+    term: list[Terminate] = list(terminate) or [Goal(out)]
     if budget is not None:
-        term = any_of(term, Budget(budget))
+        term.append(Budget(budget))
 
     async def step(value: Any) -> Any:
         run = await ReactiveExecutor().run(

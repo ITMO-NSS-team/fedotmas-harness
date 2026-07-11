@@ -48,7 +48,7 @@ async def main() -> None:
         system,
         store,
         seed=[Fact(tag="q", value="2 + 2")],
-        terminate=Goal(lambda v: v.exists("answer")),
+        terminate=[Goal("answer")],
     )
     async for r in stream:
         print(f"step {r.step}: {r.fired} -> {[f.tag for f in r.writes]}")

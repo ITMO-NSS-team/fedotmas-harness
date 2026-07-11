@@ -47,14 +47,14 @@ class System:
         goal: str,
         budget: int | None,
         plugins: Sequence[Plugin] | PluginDispatcher,
-    ) -> tuple[Any, list[Fact], Terminate, PluginDispatcher]:
+    ) -> tuple[Any, list[Fact], list[Terminate], PluginDispatcher]:
         # Imported here: executor imports System at module level.
         from fedotmas.engine.executor import ReactiveExecutor
         from fedotmas.engine.plugin import PluginDispatcher
 
-        terminate: Terminate = Goal(goal)
+        terminate: list[Terminate] = [Goal(goal)]
         if budget is not None:
-            terminate = terminate | Budget(budget)
+            terminate.append(Budget(budget))
         facts = [Fact(tag=tag, value=value) for tag, value in seed.items()]
         return ReactiveExecutor(), facts, terminate, PluginDispatcher.of(plugins)
 

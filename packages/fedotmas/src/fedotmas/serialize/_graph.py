@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from fedotmas.engine.contract import matches, patterns
 from fedotmas.engine.report import Run
-from fedotmas.engine.store import matches
 from fedotmas.engine.system import System
 
 
@@ -64,7 +64,7 @@ def to_graph(system: System, run: Run) -> Graph:
     nodes: list[GraphNode] = []
     specs: list[tuple[str, list[str], list[str]]] = []
     for n in system.nodes:
-        reads = n.reads.split()
+        reads = patterns(n.reads)
         writes = sorted(produced.get(n.name, set()))
         nodes.append(
             GraphNode(

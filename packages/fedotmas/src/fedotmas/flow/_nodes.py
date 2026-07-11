@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -14,7 +14,7 @@ from fedotmas.engine.node import as_node, inner_guard, system_step
 from fedotmas.engine.plugin import PluginDispatcher
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
-from fedotmas.engine.terminate import Budget, Goal, Terminate, any_of
+from fedotmas.engine.terminate import Budget, Goal, Terminate
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -167,11 +167,11 @@ def _nest_node(
     inner_entry: str,
     inner_out: str,
     budget: int | None,
-    until: Terminate | None = None,
+    terminate: Sequence[Terminate] = (),
     plugins: PluginDispatcher | None = None,
 ) -> Node:
     """Run a whole sub-system as one node: seed its own inner store with the outer input, run
-    until the inner output exists (or `until`, if given), write it back as one fact. The interior
+    until the inner output exists (or `terminate`, if given), write it back as one fact. The interior
     stays opaque to the outer engine; a failure surfaces as this node's error fact, the inner
     errors nested as its causes (see engine.node.system_step, the shared primitive). `budget` is
     the inner superstep cap folded into the terminate there, stamped on the Card so the
@@ -182,7 +182,7 @@ def _nest_node(
         entry=inner_entry,
         out=inner_out,
         budget=budget,
-        until=until,
+        terminate=terminate,
         plugins=plugins,
         label=f"nest {name!r}",
     )
@@ -215,19 +215,21 @@ def _loop_iterate_node(
     plugins: PluginDispatcher | None = None,
 ) -> Node:
     """One round per firing: feed the latest state (the entry fact on round one) into the
-    body in a fresh inner store, write its output as the next state version. Re-arms while
-    `until` has not yet cleared on the latest state. `budget` is the per-round superstep cap
-    folded into the round terminate here, stamped on the Card so the round-trip restores the
-    same bound. `plugins` is the nested dispatcher face: observers follow each round,
-    interceptors apply to this node as a whole, not again to every body node."""
+    body in a fresh inner store, write its output as the next version of the `state` tag —
+    the store's native version axis, so a new round is a new fact and the node re-arms off
+    its own write. Re-arms while `until` has not yet cleared on the latest state. `budget`
+    is the per-round superstep cap folded into the round terminate here, stamped on the Card
+    so the round-trip restores the same bound. `plugins` is the nested dispatcher face:
+    observers follow each round, interceptors apply to this node as a whole, not again to
+    every body node."""
     inner_plugins = plugins or PluginDispatcher()
-    round_term: Terminate = Goal(lambda v: v.exists(body_out))
+    round_term: list[Terminate] = [Goal(body_out)]
     if budget is not None:
-        round_term = any_of(round_term, Budget(budget))
+        round_term.append(Budget(budget))
 
     async def invoke(input: Any, view: View) -> Result:
-        seen = view.query(f"{state}:*")
-        src = seen[-1].value if seen else (view.value(entry) if entry else None)
+        rounds = view.count(state)
+        src = view.value(state) if rounds else (view.value(entry) if entry else None)
         run = await ReactiveExecutor().run(
             body,
             Store(),
@@ -235,26 +237,21 @@ def _loop_iterate_node(
             terminate=round_term,
             plugins=inner_plugins,
         )
-        inner_guard(run, body_out, f"loop {name!r} round {len(seen) + 1}")
-        return Result(
-            writes=[
-                Fact(tag=f"{state}:{len(seen) + 1}", value=run.view.value(body_out))
-            ]
-        )
+        inner_guard(run, body_out, f"loop {name!r} round {rounds + 1}")
+        return Result(writes=[Fact(tag=state, value=run.view.value(body_out))])
 
     def trigger(view: View) -> bool:
-        seen = view.query(f"{state}:*")
-        if not seen:
+        if not view.exists(state):
             return view.exists(entry) if entry else True
-        return not until(seen[-1].value, view)
+        return not until(view.value(state), view)
 
     return as_node(
         invoke,
         name=Loop(name).iter,
-        reads=f"{state}:*",
+        reads=state,
         trigger=trigger,
         kind=Kind.LOOP_ITER,
-        writes=[f"{state}:*"],
+        writes=[state],
         params={"until": spec_of(pred), "entry": entry, "budget": budget},
         system=body,
     )
@@ -272,16 +269,19 @@ def _loop_finish_node(
     guarded by the output not existing yet."""
 
     async def invoke(input: Any, view: View) -> Result:
-        return Result(writes=[Fact(tag=out, value=view.query(f"{state}:*")[-1].value)])
+        return Result(writes=[Fact(tag=out, value=view.value(state))])
 
     def trigger(view: View) -> bool:
-        seen = view.query(f"{state}:*")
-        return bool(seen) and until(seen[-1].value, view) and not view.exists(out)
+        return (
+            view.exists(state)
+            and until(view.value(state), view)
+            and not view.exists(out)
+        )
 
     return as_node(
         invoke,
         name=Loop(name).done,
-        reads=f"{state}:*",
+        reads=state,
         trigger=trigger,
         kind=Kind.LOOP_DONE,
         writes=[out],

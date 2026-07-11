@@ -50,7 +50,7 @@ async def run_flow(flow, value):
         system,
         Store(),
         seed=[Fact(tag="in", value=value)],
-        terminate=Goal(lambda v: v.exists("out")) | Budget(50),
+        terminate=[Goal("out"), Budget(50)],
     )
     return system, run
 

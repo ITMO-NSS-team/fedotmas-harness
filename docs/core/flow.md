@@ -268,7 +268,7 @@ def loop(
 ) -> Flow[A, A]: ...
 ```
 
-`until` reads the state after each round: a callable (over the state, optionally the state and the view), a state key (`.loop(until="done")` stops when `state["done"]` is truthy), or a `Condition`, the declarative comparison (`Condition(key="rounds_left", op="lte", value=0)`) for conditions a bare key cannot say; the ordered ops (`gt`/`lt`/`gte`/`lte`) require a `value=` and a present key, the non-comparing ops (`truthy`/`not`/`exists`) reject a stray one, and both complain by name.
+`until` reads the state after each round: a callable (over the state, optionally the state and the view), a state key (`.loop(until="done")` stops when `state["done"]` is truthy), or a `Condition`, the declarative comparison (`Condition(key="score", op="gte", value=3)`) for conditions a bare key cannot say; the ordered ops (`gt`/`gte`) require a `value=` and a present key, the non-comparing ops (`truthy`/`exists`) reject a stray one, and both complain by name.
 The key and Condition forms are data, which is what a program emitting a system can write.
 Each round runs the body in its own inner store as one outer superstep, so the run's budget caps how many rounds happen, and `.loop`'s own `budget=` caps the supersteps inside one round (`None` lifts it).
 

@@ -80,10 +80,34 @@ class Result(BaseModel):
     writes: list[Fact] = Field(default_factory=list)
 
 
+ERROR_CHANNEL = "error:"
+
+
+def matches(tag: str, pattern: str) -> bool:
+    """Does a fact tag match one pattern? The whole tag language:
+
+        TAG      a plain string, e.g. "draft" or "state:3"; `:` namespaces by convention.
+        PATTERN  a TAG matched exactly, or `prefix*` — a trailing-`*` glob matching every
+                 tag that starts with prefix ("state:*"). No other wildcard exists.
+        READS    whitespace-separated PATTERNs, split by `patterns()`: "task state:*".
+
+    Every read surface speaks it: View.query/exists/count, a node's `reads`, a rule's
+    `when=` tags. The engine reserves one namespace — a failed node's error lands as a
+    fact tagged ERROR_CHANNEL + node name, so "error:*" watches the whole channel."""
+    if pattern.endswith("*"):
+        return tag.startswith(pattern[:-1])
+    return tag == pattern
+
+
+def patterns(reads: str) -> list[str]:
+    """Split a READS declaration into its patterns (see `matches` for the language)."""
+    return reads.split()
+
+
 @runtime_checkable
 class View(Protocol):
-    """Read access to the store. `query/exists/count` take a pattern, an exact tag or a `*`
-    prefix glob; `get/value` take a pattern too and return the latest match."""
+    """Read access to the store. `query/exists/count` take a PATTERN in the tag language
+    (see `matches`); `get/value` take one too and return the latest match."""
 
     def get(self, tag: str) -> Fact | None: ...
     def value(self, tag: str) -> Any: ...

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
 
 from fedotmas.engine.contract import Fact, Status, View
 from fedotmas.engine.report import Run, StepReport
@@ -27,10 +27,10 @@ class Outcome:
     """The outcome of a run surface (System.run, Flow.run, Board.run): the engine Run plus the out tag,
     read back as one object. `value` is the produced output (None if the run never reached
     it), `ok` is "finished clean and produced the output", and `reason` says how the run
-    ended: "goal" (output produced), "error" (a node failed, see `errors`), "budget" (step
-    cap hit first), or "stalled" (the system went quiet without producing the output: a
-    wiring gap). A lenient system (halt_on_error=False) can end reason "goal" with `errors`
-    non-empty; `ok` stays False, it never overlooks an error.
+    ended: "goal" (the goal condition held), "error" (a node failed, see `errors`),
+    "budget" (step cap hit first), or "stalled" (the system went quiet without producing
+    the output: a wiring gap). A lenient system (halt_on_error=False) can end reason "goal"
+    with `errors` non-empty; `ok` stays False, it never overlooks an error.
     """
 
     run: Run
@@ -59,12 +59,8 @@ class Outcome:
         return self.run.status is Status.OK and self.run.view.exists(self.out)
 
     @property
-    def reason(self) -> Literal["goal", "error", "budget", "stalled"]:
-        if self.run.reason == "error":
-            return "error"
-        if self.run.view.exists(self.out):
-            return "goal"
-        return "stalled" if self.run.reason == "quiescence" else "budget"
+    def reason(self) -> str:
+        return "stalled" if self.run.reason == "quiescence" else self.run.reason
 
     def unwrap(self) -> Any:
         """Return the produced value, or raise RunError if the run did not finish clean. The

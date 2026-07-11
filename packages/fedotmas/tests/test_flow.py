@@ -261,7 +261,7 @@ async def test_nest_budget_caps_a_non_quiescing_inner_board():
     run = await wrapped.run("start", budget=50)
     assert not run.ok
     assert run.reason == "error"
-    assert "stopped (terminate)" in run.errors[0].value
+    assert "stopped (budget)" in run.errors[0].value
     assert run.errors[0].meta["reason"] == "budget"
 
 
@@ -326,7 +326,7 @@ async def test_join_waves_do_not_mix_across_unequal_branches():
         system,
         store,
         seed=[Fact(tag="in", value=1)],
-        terminate=Goal(lambda v: v.count("out") >= 3),
+        terminate=[Goal(lambda v: v.count("out") >= 3)],
     ):
         if not fed and store.snapshot().exists("out"):
             store.commit([Fact(tag="in", value=10, producer="feeder", step=99)])
@@ -343,7 +343,7 @@ async def _second_wave(system, first, second):
         system,
         store,
         seed=[Fact(tag="in", value=first)],
-        terminate=Goal(lambda v: v.count("out") >= 2),
+        terminate=[Goal(lambda v: v.count("out") >= 2)],
     ):
         if not fed and store.snapshot().exists("out"):
             store.commit([Fact(tag="in", value=second, producer="feeder", step=99)])

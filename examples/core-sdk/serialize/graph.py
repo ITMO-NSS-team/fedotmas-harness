@@ -28,7 +28,7 @@ async def graph_of(flow, value):
         system,
         Store(),
         seed=[Fact(tag="in", value=value)],
-        terminate=Goal(lambda v: v.exists("out")) | Budget(50),
+        terminate=[Goal("out"), Budget(50)],
     )
     return to_graph(system, run)
 

@@ -35,7 +35,7 @@ async def main() -> None:
         system,
         store,
         seed=[Fact(tag="task", value="write a tagline")],
-        terminate=Goal(lambda v: not below_bar(v)),
+        terminate=[Goal(lambda v: not below_bar(v))],
     )
     async for r in stream:
         print(f"step {r.step}: {r.fired} -> {[f.tag for f in r.writes]}")

@@ -1,7 +1,8 @@
 """Fact identity and the Store: keys, the logical clock, snapshot isolation, patterns."""
 
 from fedotmas.engine import Fact, Store
-from fedotmas.engine.store import Snapshot, matches
+from fedotmas.engine.contract import matches
+from fedotmas.engine.store import Snapshot
 
 
 def test_producer_is_part_of_the_key():

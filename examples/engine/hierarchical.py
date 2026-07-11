@@ -56,7 +56,7 @@ class Team:
             self._system,
             inner,
             seed=[Fact(tag="task", value=view.value(self.reads))],
-            terminate=Goal(lambda v: v.exists("summary")),
+            terminate=[Goal("summary")],
         )
         return Result(writes=[Fact(tag=self._out, value=run.view.value("summary"))])
 
@@ -82,7 +82,7 @@ async def main() -> None:
         system,
         store,
         seed=[Fact(tag="brief", value="witcher lore")],
-        terminate=Goal(lambda v: v.exists("report")),
+        terminate=[Goal("report")],
     )
     async for r in stream:
         print(f"step {r.step}: {r.fired} -> {[f.tag for f in r.writes]}")

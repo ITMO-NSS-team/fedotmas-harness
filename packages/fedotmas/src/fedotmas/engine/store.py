@@ -7,16 +7,11 @@ from typing import Any
 from fedotmas.engine.contract import Fact, View
 
 
-def matches(tag: str, pattern: str) -> bool:
-    if pattern.endswith("*"):
-        return tag.startswith(pattern[:-1])
-    return tag == pattern
-
-
 class Snapshot:
     """A read-only View over the facts as of one moment: the shared append-only log, the
-    shared tag index and a cutoff, so taking one copies nothing. Patterns are an exact tag
-    or a `*` prefix glob; get/value return the latest match in insertion order."""
+    shared tag index and a cutoff, so taking one copies nothing. Patterns are the contract's
+    tag language (see contract.matches); get/value return the latest match in insertion
+    order."""
 
     def __init__(
         self, facts: list[Fact], index: dict[str, list[int]], upto: int

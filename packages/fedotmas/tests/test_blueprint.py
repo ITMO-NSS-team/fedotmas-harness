@@ -16,9 +16,9 @@ from _helpers import (
     upper,
 )
 from fedotmas import Rule, action, blackboard, branch, gather, nest
+from fedotmas.engine.contract import matches
 from fedotmas.engine.policy import AuctionSelect
 from fedotmas.serialize import Blueprint, to_blueprint, to_graph
-from fedotmas.engine.store import matches
 
 
 def _covers(declared, observed):
