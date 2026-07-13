@@ -63,7 +63,7 @@ async def main() -> None:
     async for report in ReactiveExecutor().stream(
         system, store,
         seed=[Fact(tag="topic", value="witcher")],
-        terminate=Goal(lambda v: v.exists("final")),
+        terminate=[Goal("final")],
     ):
         print(f"step {report.step}: {report.fired} -> {[f.tag for f in report.writes]}")
     print("final:", store.snapshot().value("final"))
@@ -378,7 +378,7 @@ ReactiveExecutor().stream(
 ## Terminate
 
 A terminate condition decides when the run stops.
-The engine checks it after each committed superstep.
+The engine checks them after each committed superstep.
 If you pass none, the run continues until the system goes quiet on its own.
 
 ```python
@@ -386,23 +386,21 @@ class Terminate(Protocol):
     def done(self, view: View, report: StepReport) -> bool: ...
 ```
 
-Three are built in:
+Two are built in:
 
 ```python
-from fedotmas.engine import Budget, Goal, Quiescence
+from fedotmas.engine import Budget, Goal
 
-Goal(lambda v: v.exists("final"))   # stop when a predicate over the store holds
+Goal("final")                       # stop when the fact exists (the str shorthand)
+Goal(lambda v: v.count("out") > 2)  # or when any predicate over the store holds
 Budget(max_steps=8)                 # stop after N supersteps
-Quiescence()                        # stop when a step fired nobody
 ```
 
-They compose with `&` and `|`, which is the usual way to combine a success condition with a safety cap:
+`terminate=` takes a sequence, checked in order: the first condition that holds ends the run, and `Run.reason` is its name ("goal", "budget", your own class lowercased).
 
 ```python
-terminate = Goal(approved) | Budget(max_steps=8)
+terminate=[Goal(approved), Budget(max_steps=8)]
 ```
-
-The operators live on the built-in conditions; for a `Terminate` you implemented yourself, `engine.all_of` / `engine.any_of` compose anything matching the protocol.
 
 That reads as "stop when the work is approved, or after 8 steps regardless".
 The cap matters for loops where the goal might never be reached.
@@ -457,7 +455,7 @@ async def main() -> None:
     async for report in ReactiveExecutor().stream(
         system, store,
         seed=[Fact(tag="task", value="write a haiku")],
-        terminate=Goal(approved) | Budget(max_steps=8),
+        terminate=[Goal(approved), Budget(max_steps=8)],
     ):
         print(f"step {report.step}: {report.fired} -> {[f.tag for f in report.writes]}")
 ```
@@ -495,7 +493,7 @@ class Team:
         run = await ReactiveExecutor().run(
             self._system, inner,
             seed=[Fact(tag="task", value=view.value(self.reads))],
-            terminate=Goal(lambda v: v.exists("summary")),
+            terminate=[Goal("summary")],
         )
         return Result(writes=[Fact(tag=self._out, value=run.view.value("summary"))])
 
@@ -521,7 +519,7 @@ Everything below re-exports flat from `fedotmas.engine`, e.g. `from fedotmas.eng
 | `engine.ReactiveExecutor`               | the superstep loop, `stream` and `run`      |
 | `engine.Run` / `StepReport`             | the trace: status, reason, fired, writes, errors |
 | `engine.FireAll` / `AuctionSelect`      | resolve who fires in a step                 |
-| `engine.Goal` / `Budget` / `Quiescence` | when to stop, composable with `&` `|`       |
+| `engine.Goal` / `Budget`                | when to stop; `terminate=` takes a sequence |
 | `engine.as_node`                      | wrap an async function as a node            |
 
 Things to keep in mind:

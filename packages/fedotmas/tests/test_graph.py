@@ -67,12 +67,12 @@ async def test_board_graph():
         Rule("score", score, reads="draft", writes="score"),
         Rule("gate", gate, reads="score", writes="verdict", when=["score", "!verdict"]),
     )
-    system = board.compile()
+    system = board.system()
     run = await ReactiveExecutor().run(
         system,
         Store(),
         seed=[Fact(tag="draft", value="a b c d e f")],
-        terminate=Goal(lambda v: v.exists("verdict")) | Budget(50),
+        terminate=[Goal("verdict"), Budget(50)],
     )
     g = to_graph(system, run)
     assert node(g, "score").kind == "rule"

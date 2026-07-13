@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from functools import reduce
 from typing import Protocol
 
 from fedotmas.engine.contract import View
@@ -9,24 +8,15 @@ from fedotmas.engine.report import StepReport
 
 
 class Terminate(Protocol):
-    """A stop condition checked after each superstep. Combine the built-ins with `&` and `|`,
-    or fold many with all_of/any_of."""
+    """A stop condition checked after each superstep. Run surfaces take a sequence of these
+    with any-of semantics: the first one that holds ends the run, and its lowercased class
+    name becomes Run.reason ("goal", "budget", ...). The executor consults `done` again to
+    name that reason, so it must be a pure function of its arguments."""
 
     def done(self, view: View, report: StepReport) -> bool: ...
 
 
-class _Term:
-    def __and__(self, other: Terminate) -> Terminate:
-        return _And(self, other)
-
-    def __or__(self, other: Terminate) -> Terminate:
-        return _Or(self, other)
-
-    def done(self, view: View, report: StepReport) -> bool:
-        raise NotImplementedError
-
-
-class Budget(_Term):
+class Budget:
     """Stop after `max_steps` supersteps. Counts the report index, the per-run axis, so it caps
     one run regardless of where the store clock started."""
 
@@ -39,7 +29,7 @@ class Budget(_Term):
         return report.index + 1 >= self.max_steps
 
 
-class Goal(_Term):
+class Goal:
     """Stop once a predicate over the store holds; a tag string is shorthand for that fact
     existing, so Goal("out") means v.exists("out")."""
 
@@ -51,40 +41,3 @@ class Goal(_Term):
 
     def done(self, view: View, report: StepReport) -> bool:
         return self.predicate(view)
-
-
-class Quiescence(_Term):
-    """Stop when a superstep fires nothing: the system has gone quiet on its own."""
-
-    def done(self, view: View, report: StepReport) -> bool:
-        return not report.fired
-
-
-class _And(_Term):
-    def __init__(self, a: Terminate, b: Terminate) -> None:
-        self.a, self.b = a, b
-
-    def done(self, view: View, report: StepReport) -> bool:
-        return self.a.done(view, report) and self.b.done(view, report)
-
-
-class _Or(_Term):
-    def __init__(self, a: Terminate, b: Terminate) -> None:
-        self.a, self.b = a, b
-
-    def done(self, view: View, report: StepReport) -> bool:
-        return self.a.done(view, report) or self.b.done(view, report)
-
-
-def all_of(*terms: Terminate) -> Terminate:
-    """Stop when every term holds. The n-ary form of `&`."""
-    if not terms:
-        raise ValueError("all_of needs at least one Terminate")
-    return reduce(_And, terms)
-
-
-def any_of(*terms: Terminate) -> Terminate:
-    """Stop when any term holds. The n-ary form of `|`."""
-    if not terms:
-        raise ValueError("any_of needs at least one Terminate")
-    return reduce(_Or, terms)

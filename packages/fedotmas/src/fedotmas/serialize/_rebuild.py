@@ -54,8 +54,15 @@ def from_blueprint(blueprint: Blueprint, deps: Deps) -> System:
     name; a declarative control spec (state-key until/select) is recompiled to its predicate.
     The round-trip is the contract: `to_blueprint(from_blueprint(bp, deps)) == bp` and the
     rebuilt system runs to the same output. A node the blueprint could only mark (a callable
-    until/select/when, an unknown kind) raises ReconstructError."""
-    return System([_node(n, deps) for n in blueprint.nodes])
+    until/select/when, an unknown kind, a policy strategy) raises ReconstructError."""
+    if blueprint.policy is not None:
+        raise ReconstructError(
+            f"policy {blueprint.policy!r} is an opaque strategy the blueprint cannot rebuild"
+        )
+    return System(
+        [_node(n, deps) for n in blueprint.nodes],
+        halt_on_error=blueprint.halt_on_error,
+    )
 
 
 def _node(n: BlueprintNode, deps: Deps) -> Node:
@@ -117,14 +124,27 @@ def _nest(n: BlueprintNode, deps: Deps) -> Node:
 
 
 def _rule(n: BlueprintNode, deps: Deps) -> Node:
-    rule = Rule(
-        n.name,
-        deps.bodies.get(n.base) or _missing(n.name),
-        writes=_first(n.writes),
-        reads=n.params.get("input", ""),
-        when=_when(n.name, n.params.get("when")),
-        meta=dict(n.meta),
-    )
+    if n.inner is not None:
+        rule = Rule(
+            n.name,
+            nest=from_blueprint(n.inner, deps),
+            writes=_first(n.writes),
+            reads=n.params.get("input", ""),
+            when=_when(n.name, n.params.get("when")),
+            entry=n.params["entry"],
+            out=n.params["out"],
+            budget=n.params.get("budget", 100),
+            meta=dict(n.meta),
+        )
+    else:
+        rule = Rule(
+            n.name,
+            deps.bodies.get(n.base) or _missing(n.name),
+            writes=_first(n.writes),
+            reads=n.params.get("input", ""),
+            when=_when(n.name, n.params.get("when")),
+            meta=dict(n.meta),
+        )
     return rule.to_node(deps.bind)
 
 

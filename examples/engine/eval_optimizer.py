@@ -53,7 +53,7 @@ async def main() -> None:
         system,
         store,
         seed=[Fact(tag="task", value="write a haiku")],
-        terminate=Goal(approved) | Budget(max_steps=8),
+        terminate=[Goal(approved), Budget(max_steps=8)],
     )
     async for report in stream:
         print(

@@ -8,6 +8,7 @@ from _helpers import bump, count, double, gate, pick_a, pick_b, score, triple, u
 from fedotmas import Rule, action, blackboard, branch, gather, nest
 from fedotmas.engine.contract import Fact
 from fedotmas.engine.executor import ReactiveExecutor
+from fedotmas.engine.policy import AuctionSelect
 from fedotmas.engine.store import Store
 from fedotmas.engine.terminate import Budget, Goal
 from fedotmas.serialize import Deps, ReconstructError, from_blueprint, to_blueprint
@@ -19,7 +20,7 @@ async def _out(system, seed_tag, value, goal):
         system,
         Store(),
         seed=[Fact(tag=seed_tag, value=value)],
-        terminate=Goal(lambda v: v.exists(goal)) | Budget(50),
+        terminate=[Goal(goal), Budget(50)],
     )
     return run.view.value(goal)
 
@@ -64,7 +65,7 @@ async def test_roundtrip_board():
         Rule("score", score, reads="draft", writes="score"),
         Rule("gate", gate, reads="score", writes="verdict", when=["score", "!verdict"]),
     )
-    system = board.compile()
+    system = board.system()
     bp = to_blueprint(system)
     rebuilt = from_blueprint(bp, Deps(bodies={"score": score, "gate": gate}))
     assert to_blueprint(rebuilt) == bp
@@ -114,6 +115,24 @@ async def test_roundtrip_nest_keeps_non_default_budget():
     )
 
 
+async def test_roundtrip_nest_rule():
+    """A rule whose body is a whole sub-system rebuilds from the blueprint alone plus the
+    leaf bodies: the inner system is declarative, not a callable hole."""
+    inner = blackboard(Rule("count", count, reads="q", writes="a"))
+    board = blackboard(
+        Rule("sub", nest=inner, reads="task", writes="answer", entry="q", out="a"),
+        Rule("gate", gate, reads="answer", writes="verdict"),
+    )
+    system = board.system()
+    bp = to_blueprint(system)
+    rebuilt = from_blueprint(bp, Deps(bodies={"count": count, "gate": gate}))
+    assert to_blueprint(rebuilt) == bp
+    text = "a b c"
+    assert await _out(rebuilt, "task", text, "verdict") == await _out(
+        system, "task", text, "verdict"
+    )
+
+
 def test_missing_body_is_named_error():
     bp = to_blueprint(action(double).system(entry="in", out="out"))
     with pytest.raises(ReconstructError):
@@ -159,3 +178,21 @@ async def test_roundtrip_loop_over_branch_with_a_nested_loop():
     assert to_blueprint(rebuilt) == bp
     v = {"n": 4, "tries": 0, "sub": 0, "mode": "fast", "solved": False}
     assert await _out(rebuilt, "in", v, "out") == await _out(system, "in", v, "out")
+
+
+async def test_roundtrip_carries_halt_on_error():
+    system = action(double).system(entry="in", out="out", halt_on_error=False)
+    bp = to_blueprint(system)
+    rebuilt = from_blueprint(bp, Deps(bodies={"double": double}))
+    assert rebuilt.halt_on_error is False
+    assert to_blueprint(rebuilt) == bp
+
+
+def test_a_policy_marked_blueprint_refuses_to_rebuild():
+    board = blackboard(
+        Rule("score", score, reads="seed", writes="out"),
+        policy=AuctionSelect(key=lambda n, v: 1.0),
+    )
+    bp = to_blueprint(board.system())
+    with pytest.raises(ReconstructError, match="policy"):
+        from_blueprint(bp, Deps(bodies={"score": score}))

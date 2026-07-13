@@ -1,6 +1,6 @@
 import asyncio
 
-from fedotmas import Outcome, Rule, action, blackboard, run
+from fedotmas import Outcome, Rule, action, blackboard
 
 
 async def double(x: int) -> int:
@@ -35,7 +35,7 @@ async def on_board() -> Outcome:
 
 async def on_system() -> Outcome:
     system = (action(double) + action(triple)).system(entry="in", out="out")
-    return await run(system, {"in": 2}, goal="out")
+    return await system.run({"in": 2}, goal="out")
 
 
 async def main() -> None:

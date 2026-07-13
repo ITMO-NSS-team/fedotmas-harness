@@ -12,8 +12,10 @@ from fedotmas._condition import (
     view_predicate,
 )
 from fedotmas._inject import bind_async
-from fedotmas.engine.contract import Fact, Kind, Node, Result, View
-from fedotmas.engine.node import as_node
+from fedotmas.engine.contract import Fact, Kind, Node, Result, View, patterns
+from fedotmas.engine.node import as_node, system_step
+from fedotmas.engine.plugin import PluginDispatcher
+from fedotmas.engine.system import Compilable, System
 
 # A rule's code body of either arity: `async (input)` or `async (input, view)`. The union keeps
 # both forms typed; _inject.bind_async adapts the one-arg form to the (input, view) contract.
@@ -32,18 +34,21 @@ def _produce_once(reads: str, writes: str) -> When:
 
 @dataclass
 class Rule:
-    """One self-activating blackboard node with a code body. When its condition holds, run the
-    step and write the result to the `writes` fact; `reads` names the fact fed to the step as
-    input (empty means none). The step is `fn`: code as `async (input)` or
-    `async (input, view)`, where the trailing view is optional. `when` defaults to produce-once,
-    fire when `reads` exists and `writes` does not yet, so a pipeline rule needs no trigger;
-    supply `when` for opportunistic activation, as a sequence of tags that must all exist
-    (`"!tag"` for must-not-exist), a Condition over the view (or its `&`/`|`/`~` composition),
-    or, past those, a callable over the View. `meta`
-    rides along to the node, e.g. an auction bid that a Policy reads back off
-    `node.describe().meta`. A rule whose body is a prompt instead of code is PromptRule in the
-    fedotmas-llm extension, a subclass that overrides `_body`; the blackboard itself is
-    model-free.
+    """One self-activating blackboard node. When its condition holds, run the step and write
+    the result to the `writes` fact; `reads` names the fact fed to the step as input (empty
+    means none). The step is `fn`: code as `async (input)` or `async (input, view)`, where
+    the trailing view is optional — or `nest=`: a whole sub-system (a Board, a Flow, a System,
+    anything Compilable) run as the rule's body, which is how a board becomes one rule of
+    another board. A nest rule seeds the inner store with its input under `entry`, runs until
+    `out` exists (`budget` caps the inner supersteps) and writes the value of `out`; a failure
+    surfaces as this rule's error fact with the inner errors nested as its causes. `when`
+    defaults to produce-once, fire when `reads` exists and `writes` does not yet, so a
+    pipeline rule needs no trigger; supply `when` for opportunistic activation, as a sequence
+    of tags that must all exist (`"!tag"` for must-not-exist), a Condition over the view (or
+    its `&`/`|`/`~` composition), or, past those, a callable over the View. `meta` rides along
+    to the node, e.g. an auction bid that a Policy reads back off `node.describe().meta`. A
+    rule whose body is a prompt instead of code is PromptRule in the fedotmas-llm extension, a
+    subclass that overrides `_body`; the blackboard itself is model-free.
     """
 
     name: str
@@ -51,12 +56,16 @@ class Rule:
     writes: str = ""
     reads: str = ""
     when: When | Sequence[str] | Predicate | None = None
+    nest: System | Compilable | None = None
+    entry: str = "in"
+    out: str = "out"
+    budget: int | None = 100
     meta: dict[str, Any] = field(default_factory=dict)
 
     def _body(self, bind: Mapping[str, Any]) -> _BoundFn:
         """The rule's step as an `(input, view)` body. The base rule adapts `fn`; an extension
         subclass overrides this to build its body from the run-scoped `bind` (e.g. a prompt
-        rule resolving `bind["llm"]`). The one seam a new rule-kind implements."""
+        rule resolving `bind["llm"]`). The one extension point a new rule-kind implements."""
         if self.fn is None:
             raise ValueError(f"rule {self.name!r}: fn= is required")
         return bind_async(self.fn)
@@ -64,14 +73,21 @@ class Rule:
     def _validate(self) -> None:
         """Check the rule is well-formed before it is built. A subclass checks its own body
         requirement, then calls `_check_common` for the shared trigger/writes checks."""
-        if self.fn is None:
+        if self.nest is not None:
+            if self.fn is not None:
+                raise ValueError(f"rule {self.name!r}: fn= and nest= are exclusive")
+            if not self.entry or not self.out:
+                raise ValueError(
+                    f"rule {self.name!r}: nest= needs entry= and out= tags"
+                )
+        elif self.fn is None:
             raise ValueError(f"rule {self.name!r}: fn= is required")
         self._check_common()
 
     def _check_common(self) -> None:
         if not self.writes:
             raise ValueError(f"rule {self.name!r}: writes= is required")
-        if len(self.reads.split()) > 1:
+        if len(patterns(self.reads)) > 1:
             raise ValueError(
                 f"rule {self.name!r}: reads= names one fact tag; condition on several "
                 "facts with when= and read them off the view"
@@ -81,7 +97,8 @@ class Rule:
             return
         if isinstance(when, str) or not when or any(t in ("", "!") for t in when):
             raise ValueError(
-                f"rule {self.name!r}: when= takes a sequence of non-empty tags"
+                f"rule {self.name!r}: when= takes a sequence of non-empty tags — "
+                '["x"] means the fact exists; for a truthy value use Condition(key="x")'
             )
         clash = {t for t in when if not t.startswith("!")} & {
             t[1:] for t in when if t.startswith("!")
@@ -109,11 +126,39 @@ class Rule:
         tags += [t for t in need if t not in tags]
         return " ".join(tags)
 
-    def to_node(self, bind: Mapping[str, Any]) -> Node:
+    def to_node(
+        self, bind: Mapping[str, Any], plugins: PluginDispatcher | None = None
+    ) -> Node:
         """Compile the rule to an engine Node, resolving its body against the run-scoped `bind`.
         The blackboard machinery (trigger, re-fire identity, reads/writes, meta) lives here;
-        only the body comes from `_body`, so an extension rule-kind reuses all of it."""
-        fn = self._body(bind)
+        the body comes from `_body` — or from `nest=`, compiled through system_step — so an
+        extension rule-kind and a nested system reuse all of it. `plugins` is the board's
+        dispatcher; a nest rule bakes its nested face into the inner boundary."""
+        params: dict[str, Any] = {"input": self.reads}
+        system = None
+        fn: _BoundFn
+        if self.nest is not None:
+            face = (plugins or PluginDispatcher()).nested(self.name)
+            target = self.nest
+            system = (
+                target
+                if isinstance(target, System)
+                else target.system(
+                    entry=self.entry, out=self.out, bind=bind, plugins=face
+                )
+            )
+            step = system_step(
+                system,
+                entry=self.entry,
+                out=self.out,
+                budget=self.budget,
+                plugins=face,
+                label=f"rule {self.name!r}",
+            )
+            fn = lambda input, view: step(input)  # noqa: E731
+            params |= {"entry": self.entry, "out": self.out, "budget": self.budget}
+        else:
+            fn = self._body(bind)
 
         async def invoke(input: Any, view: View) -> Result:
             value = await fn(view.value(self.reads) if self.reads else None, view)
@@ -128,5 +173,6 @@ class Rule:
             meta=self.meta,
             kind=Kind.RULE,
             writes=[self.writes],
-            params={"when": when_desc, "input": self.reads},
+            params={"when": when_desc, **params},
+            system=system,
         )

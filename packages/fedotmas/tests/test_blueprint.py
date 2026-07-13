@@ -16,8 +16,9 @@ from _helpers import (
     upper,
 )
 from fedotmas import Rule, action, blackboard, branch, gather, nest
+from fedotmas.engine.contract import matches
+from fedotmas.engine.policy import AuctionSelect
 from fedotmas.serialize import Blueprint, to_blueprint, to_graph
-from fedotmas.engine.store import matches
 
 
 def _covers(declared, observed):
@@ -70,7 +71,7 @@ def test_board_uniform_with_flow():
         Rule("score", score, reads="draft", writes="score"),
         Rule("gate", gate, reads="score", writes="verdict", when=["score", "!verdict"]),
     )
-    bp = to_blueprint(board.compile())
+    bp = to_blueprint(board.system())
     assert node(bp, "score").kind == "rule"
     assert node(bp, "score").writes == ["score"]
     assert node(bp, "gate").writes == ["verdict"]
@@ -95,6 +96,34 @@ def test_flow_over_board_recurses():
     assert nestnode.inner is not None
     assert node(nestnode.inner, "count").kind == "rule"
     assert has_edge(bp, "upper#1", "nest#2")
+
+
+def test_nest_rule_recurses_and_declares_its_boundary():
+    inner = blackboard(Rule("count", count, reads="q", writes="a"))
+    board = blackboard(
+        Rule("sub", nest=inner, reads="task", writes="answer", entry="q", out="a")
+    )
+    bp = to_blueprint(board.system())
+    sub = node(bp, "sub")
+    assert sub.kind == "rule"
+    assert sub.params["entry"] == "q"
+    assert sub.params["out"] == "a"
+    assert sub.params["budget"] == 100
+    assert sub.inner is not None
+    assert node(sub.inner, "count").kind == "rule"
+
+
+def test_blueprint_carries_the_system_discipline():
+    rules = (Rule("count", count, reads="topic", writes="report"),)
+    plain = to_blueprint(blackboard(*rules).system())
+    assert plain.policy is None
+    assert plain.halt_on_error is True
+    board = blackboard(
+        *rules, policy=AuctionSelect(key=lambda n, v: 1.0), halt_on_error=False
+    )
+    bp = to_blueprint(board.system())
+    assert bp.policy == "AuctionSelect"
+    assert bp.halt_on_error is False
 
 
 def test_blueprint_is_json_clean():

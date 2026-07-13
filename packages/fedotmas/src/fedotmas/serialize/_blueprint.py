@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from fedotmas._addressing import base_of
 from fedotmas.engine.system import System
-from fedotmas.serialize._dataflow import _edges
+from fedotmas.serialize._graph import _edges
 
 
 class BlueprintNode(BaseModel):
@@ -28,12 +28,16 @@ class BlueprintEdge(BaseModel):
 
 class Blueprint(BaseModel):
     """A compiled System projected to its declarative shape before any run: each node's kind,
-    reads, declared writes, params and meta, plus the declared dataflow edges. Recurses into
-    nested systems (nest, loop) and reads only the engine floor, so it is the same shape for a
-    flow, a board, or their combination."""
+    reads, declared writes, params and meta, plus the declared dataflow edges and the
+    system's own discipline (`halt_on_error`; `policy` is the strategy's class name, a marker
+    for a hole the blueprint cannot rebuild). Recurses into nested systems (nest, loop) and
+    reads only the engine floor, so it is the same shape for a flow, a board, or their
+    combination."""
 
     nodes: list[BlueprintNode]
     edges: list[BlueprintEdge] = Field(default_factory=list)
+    policy: str | None = None
+    halt_on_error: bool = True
 
 
 def to_blueprint(system: System) -> Blueprint:
@@ -59,7 +63,12 @@ def to_blueprint(system: System) -> Blueprint:
         )
     specs = [(c.name, c.reads, c.writes) for c in cards]
     edges = [BlueprintEdge(src=s, dst=d, via=v) for s, d, v in _edges(specs)]
-    return Blueprint(nodes=nodes, edges=edges)
+    return Blueprint(
+        nodes=nodes,
+        edges=edges,
+        policy=type(system.policy).__name__ if system.policy else None,
+        halt_on_error=system.halt_on_error,
+    )
 
 
 BlueprintNode.model_rebuild()

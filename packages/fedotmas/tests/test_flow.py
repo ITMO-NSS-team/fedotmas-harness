@@ -13,7 +13,16 @@ from fedotmas import (
     gather,
     nest,
 )
-from fedotmas.engine import Fact, Goal, ReactiveExecutor, Store
+from fedotmas.engine import (
+    AuctionSelect,
+    Fact,
+    Goal,
+    ReactiveExecutor,
+    Result,
+    Store,
+    System,
+    as_node,
+)
 from pydantic import BaseModel
 
 
@@ -219,6 +228,17 @@ async def test_unwrap_raises_run_error_naming_the_reason():
         run.unwrap()
 
 
+async def test_unwrap_carries_the_error_facts():
+    async def bad(x):
+        return x["missing"]
+
+    run = await action(bad).run({"a": 1})
+    with pytest.raises(RunError) as exc:
+        run.unwrap()
+    assert exc.value.reason == "error"
+    assert exc.value.errors == run.errors
+
+
 async def test_nest_runs_a_flow_as_one_node():
     run = await nest(action(double), entry="a", out="b").run(3)
     assert run.value == 6
@@ -237,11 +257,64 @@ async def test_nest_budget_caps_a_non_quiescing_inner_board():
             when=lambda v: v.exists("tick"),
         ),
     )
-    wrapped = nest(spinner.system, entry="tick", out="never", budget=5)
+    wrapped = nest(spinner.system(), entry="tick", out="never", budget=5)
     run = await wrapped.run("start", budget=50)
     assert not run.ok
     assert run.reason == "error"
-    assert "stopped (terminate)" in run.errors[0].value
+    assert "stopped (budget)" in run.errors[0].value
+    assert run.errors[0].meta["reason"] == "budget"
+
+
+async def test_a_nest_failure_carries_the_inner_error_as_a_cause():
+    async def flaky(x):
+        raise TimeoutError("too slow")
+
+    inner = blackboard(Rule("worker", fn=flaky, reads="task", writes="out"))
+    run = await nest(inner, entry="task", out="out").run("job")
+    assert not run.ok
+    err = run.errors[0]
+    assert err.meta["type"] == "RunError"
+    assert err.meta["reason"] == "error"
+    [cause] = err.meta["causes"]
+    assert cause["producer"] == "worker"
+    assert cause["meta"]["type"] == "TimeoutError"
+    assert "too slow" in cause["meta"]["traceback"]
+
+
+async def test_a_deep_failure_arrives_as_a_tree_of_causes():
+    async def flaky(x):
+        raise ValueError("leaf boom")
+
+    leaf = blackboard(Rule("leaf", fn=flaky, reads="topic", writes="report"))
+    mid = nest(leaf, entry="topic", out="report")
+    run = await nest(mid, entry="q", out="a").run("x")
+    assert not run.ok
+    err = run.errors[0]
+    assert err.meta["type"] == "RunError"
+    [mid_cause] = err.meta["causes"]
+    assert mid_cause["meta"]["type"] == "RunError"
+    [leaf_cause] = mid_cause["meta"]["causes"]
+    assert leaf_cause["producer"] == "leaf"
+    assert leaf_cause["meta"]["type"] == "ValueError"
+    assert "leaf boom" in leaf_cause["meta"]["traceback"]
+
+
+async def test_a_stalled_inner_run_names_its_reason():
+    """The raw System floor skips the board's out-validation, so an inner run can still
+    quiesce short of the goal — and the boundary names that stall, not a failure."""
+    inner = blackboard(Rule("aside", fn=echo, reads="task", writes="elsewhere"))
+    run = await nest(inner.system(), entry="task", out="out").run("job")
+    assert not run.ok
+    err = run.errors[0]
+    assert err.meta["reason"] == "stalled"
+    assert err.meta["causes"] == []
+    assert "stopped (quiescence)" in err.value
+
+
+async def test_nest_rejects_a_board_out_nothing_writes():
+    inner = blackboard(Rule("aside", fn=echo, reads="task", writes="elsewhere"))
+    with pytest.raises(ValueError, match="no rule writes"):
+        await nest(inner, entry="task", out="out").run("job")
 
 
 async def test_join_waves_do_not_mix_across_unequal_branches():
@@ -253,7 +326,7 @@ async def test_join_waves_do_not_mix_across_unequal_branches():
         system,
         store,
         seed=[Fact(tag="in", value=1)],
-        terminate=Goal(lambda v: v.count("out") >= 3),
+        terminate=[Goal(lambda v: v.count("out") >= 3)],
     ):
         if not fed and store.snapshot().exists("out"):
             store.commit([Fact(tag="in", value=10, producer="feeder", step=99)])
@@ -270,7 +343,7 @@ async def _second_wave(system, first, second):
         system,
         store,
         seed=[Fact(tag="in", value=first)],
-        terminate=Goal(lambda v: v.count("out") >= 2),
+        terminate=[Goal(lambda v: v.count("out") >= 2)],
     ):
         if not fed and store.snapshot().exists("out"):
             store.commit([Fact(tag="in", value=second, producer="feeder", step=99)])
@@ -324,3 +397,69 @@ async def test_nest_wraps_a_mutually_recursive_board_as_one_node():
     out = await nest(haggle, entry="ask", out="deal", budget=30).run(100.0)
     assert out.ok
     assert out.value == {"price": 81.0, "rounds": 3}
+
+
+async def test_a_board_policy_survives_nest():
+    def says(name):
+        async def fn(value, view):
+            return name
+
+        return fn
+
+    bids = {"hi": 0.9, "lo": 0.1}
+    board = blackboard(
+        Rule("hi", fn=says("hi"), reads="seed", writes="pick"),
+        Rule("lo", fn=says("lo"), reads="seed", writes="pick"),
+        policy=AuctionSelect(key=lambda n, v: bids[n.name]),
+    )
+    run = await nest(board, entry="seed", out="pick").run(1)
+    assert run.ok
+    assert run.value == "hi"
+
+
+async def test_a_lenient_board_inside_nest_succeeds_past_a_failing_rule():
+    async def boom(value, view):
+        raise RuntimeError("boom")
+
+    board = blackboard(
+        Rule("ok", fn=double, reads="seed", writes="answer"),
+        Rule("bad", fn=boom, reads="seed", writes="other"),
+        halt_on_error=False,
+    )
+    run = await nest(board, entry="seed", out="answer").run(3)
+    assert run.ok
+    assert run.value == 6
+
+
+async def test_a_strict_board_inside_nest_fails_on_the_same_rule():
+    async def boom(value, view):
+        raise RuntimeError("boom")
+
+    board = blackboard(
+        Rule("ok", fn=double, reads="seed", writes="answer"),
+        Rule("bad", fn=boom, reads="seed", writes="other"),
+    )
+    run = await nest(board, entry="seed", out="answer").run(3)
+    assert not run.ok
+    assert run.errors
+
+
+async def test_nest_accepts_any_compilable():
+    """The open boundary: any object exposing .system(...) enters the arrow world; the core
+    never switches on its class."""
+
+    class Doubler:
+        def system(self, *, entry="in", out="out", bind=None, plugins=()):
+            async def invoke(input, view):
+                return Result(writes=[Fact(tag=out, value=view.value(entry) * 2)])
+
+            return System([as_node(invoke, name="dbl", reads=entry, writes=[out])])
+
+    run = await nest(Doubler(), entry="q", out="a").run(21)
+    assert run.ok
+    assert run.value == 42
+
+
+async def test_flow_system_compiles_with_default_tags():
+    out = await action(double).system().run({"in": 2})
+    assert out.value == 4

@@ -57,7 +57,7 @@ async def main() -> None:
         system,
         store,
         seed=[Fact(tag="topic", value="ship it?")],
-        terminate=Goal(lambda v: v.count("msg:*") >= 4) | Budget(max_steps=12),
+        terminate=[Goal(lambda v: v.count("msg:*") >= 4), Budget(max_steps=12)],
     )
     async for r in stream:
         print(f"step {r.step}: {r.fired} -> {[f.tag for f in r.writes]}")

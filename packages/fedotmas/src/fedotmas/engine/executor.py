@@ -2,37 +2,25 @@ from __future__ import annotations
 
 import asyncio
 import traceback
-from collections.abc import AsyncIterator, Iterable
-from typing import Literal, NamedTuple, Protocol
+from collections.abc import AsyncIterator, Iterable, Sequence
+from typing import Any, NamedTuple
 
-from fedotmas.engine.contract import Fact, Key, Node, Status, View
-from fedotmas.engine.policy import FireAll, Policy
+from fedotmas.engine.contract import (
+    ERROR_CHANNEL,
+    Fact,
+    Key,
+    Node,
+    Status,
+    View,
+    patterns,
+)
+from fedotmas.engine.outcome import RunError
+from fedotmas.engine.plugin import Plugin, PluginDispatcher
+from fedotmas.engine.policy import FireAll
 from fedotmas.engine.report import Run, StepReport
 from fedotmas.engine.store import Store
 from fedotmas.engine.system import System
 from fedotmas.engine.terminate import Terminate
-
-
-class Executor(Protocol):
-    def stream(
-        self,
-        system: System,
-        store: Store,
-        *,
-        seed: Iterable[Fact] = (),
-        terminate: Terminate | None = None,
-        policy: Policy | None = None,
-    ) -> AsyncIterator[StepReport]: ...
-
-    async def run(
-        self,
-        system: System,
-        store: Store,
-        *,
-        seed: Iterable[Fact] = (),
-        terminate: Terminate | None = None,
-        policy: Policy | None = None,
-    ) -> Run: ...
 
 
 def _stamp(facts: Iterable[Fact], producer: str, step: int) -> list[Fact]:
@@ -55,7 +43,7 @@ def _seed(facts: Iterable[Fact], step: int) -> list[Fact]:
 
 
 def _matched(view: View, reads: str) -> list[Fact]:
-    return [f for pattern in reads.split() for f in view.query(pattern)]
+    return [f for pattern in patterns(reads) for f in view.query(pattern)]
 
 
 class _Armed(NamedTuple):
@@ -83,22 +71,27 @@ def _ready(
 
 
 def _error_fact(name: str, message: str, step: int, exc: Exception | None) -> Fact:
-    meta = {}
+    """The uniform error record: meta always carries `type`, `traceback` and `causes`. A
+    RunError (a failed inner run) adds `reason` and dumps its facts into causes — each dump
+    nests its own, so a deep failure arrives as a tree, not a flattened string."""
+    meta: dict[str, Any] = {"type": None, "traceback": None, "causes": []}
     if exc is not None:
-        meta = {
-            "type": type(exc).__name__,
-            "traceback": "".join(traceback.format_exception(exc)),
-        }
-    return Fact(tag=f"error:{name}", value=message, producer=name, step=step, meta=meta)
+        meta["type"] = type(exc).__name__
+        meta["traceback"] = "".join(traceback.format_exception(exc))
+    if isinstance(exc, RunError):
+        meta["reason"] = exc.reason
+        meta["causes"] = [e.model_dump() for e in exc.errors]
+    return Fact(
+        tag=ERROR_CHANNEL + name, value=message, producer=name, step=step, meta=meta
+    )
 
 
 class ReactiveExecutor:
-    """The superstep loop. `halt_on_error` (default True) ends the run on the first failed
-    node; with False the error is still committed as a fact and reported, but the rest of the
-    system keeps running and the Run carries Status.ERROR at the end."""
-
-    def __init__(self, *, halt_on_error: bool = True) -> None:
-        self._halt = halt_on_error
+    """The superstep loop. The selection policy and the error discipline come from the system
+    itself (`system.policy`, `system.halt_on_error`), so they hold wherever it runs —
+    top-level or inside nest/loop. `plugins` accepts the raw list or an already-bound
+    PluginDispatcher; `after_run` fires when a run completes — for `stream`, that is the
+    natural end of the iteration, so an abandoned stream fires no end hook."""
 
     async def stream(
         self,
@@ -106,11 +99,52 @@ class ReactiveExecutor:
         store: Store,
         *,
         seed: Iterable[Fact] = (),
-        terminate: Terminate | None = None,
-        policy: Policy | None = None,
+        terminate: Sequence[Terminate] = (),
+        plugins: Sequence[Plugin] | PluginDispatcher = (),
     ) -> AsyncIterator[StepReport]:
-        active = policy or FireAll()
+        dispatcher = PluginDispatcher.of(plugins)
+        steps: list[StepReport] = []
+        async for report in self._steps(system, store, seed, terminate, dispatcher):
+            steps.append(report)
+            yield report
+        await dispatcher.after_run(
+            self._finish(
+                steps, store, dispatcher.scope, system.halt_on_error, terminate
+            )
+        )
+
+    async def run(
+        self,
+        system: System,
+        store: Store,
+        *,
+        seed: Iterable[Fact] = (),
+        terminate: Sequence[Terminate] = (),
+        plugins: Sequence[Plugin] | PluginDispatcher = (),
+    ) -> Run:
+        dispatcher = PluginDispatcher.of(plugins)
+        steps = [
+            report
+            async for report in self._steps(system, store, seed, terminate, dispatcher)
+        ]
+        run = self._finish(
+            steps, store, dispatcher.scope, system.halt_on_error, terminate
+        )
+        await dispatcher.after_run(run)
+        return run
+
+    async def _steps(
+        self,
+        system: System,
+        store: Store,
+        seed: Iterable[Fact],
+        terminate: Sequence[Terminate],
+        dispatcher: PluginDispatcher,
+    ) -> AsyncIterator[StepReport]:
+        active = system.policy or FireAll()
+        scope = dispatcher.scope
         store.commit(_seed(seed, store.next_step() - 1))
+        await dispatcher.before_run(system, store.snapshot())
         last_input: dict[str, frozenset[Key]] = {}
         index = 0
         while True:
@@ -120,10 +154,12 @@ class ReactiveExecutor:
             chosen = {n.name for n in active.select([a.node for a in armed], view)}
             armed = [a for a in armed if a.node.name in chosen]
             if not armed:
-                yield StepReport(step, index, [], [])
+                report = StepReport(step, index, [], [], view=view, scope=scope)
+                await dispatcher.after_step(report)
+                yield report
                 return
             results = await asyncio.gather(
-                *(a.node.invoke(a.input, view) for a in armed),
+                *(dispatcher.invoke(a.node, a.input, view) for a in armed),
                 return_exceptions=True,
             )
             writes: list[Fact] = []
@@ -133,45 +169,53 @@ class ReactiveExecutor:
                 if isinstance(result, BaseException):
                     if not isinstance(result, Exception):
                         raise result
-                    errors.append(_error_fact(a.node.name, str(result), step, result))
+                    error = _error_fact(a.node.name, str(result), step, result)
+                    await dispatcher.on_error(a.node, error, view)
+                    errors.append(error)
                     continue
                 if result.status is Status.ERROR:
-                    errors.append(
-                        _error_fact(a.node.name, result.error or "", step, None)
-                    )
+                    error = _error_fact(a.node.name, result.error or "", step, None)
+                    await dispatcher.on_error(a.node, error, view)
+                    errors.append(error)
                 writes.extend(_stamp(result.writes, a.node.name, step))
             store.commit([*writes, *errors])
+            post = store.snapshot()
             report = StepReport(
-                step, index, [a.node.name for a in armed], writes, errors
+                step,
+                index,
+                [a.node.name for a in armed],
+                writes,
+                view=post,
+                errors=errors,
+                scope=scope,
             )
+            await dispatcher.after_step(report)
             yield report
-            if errors and self._halt:
+            if errors and system.halt_on_error:
                 return
-            if terminate is not None and terminate.done(store.snapshot(), report):
+            if any(t.done(post, report) for t in terminate):
                 return
             index += 1
 
-    async def run(
+    def _finish(
         self,
-        system: System,
+        steps: list[StepReport],
         store: Store,
-        *,
-        seed: Iterable[Fact] = (),
-        terminate: Terminate | None = None,
-        policy: Policy | None = None,
+        scope: tuple[str, ...],
+        halt: bool,
+        terminate: Sequence[Terminate],
     ) -> Run:
-        steps = [
-            report
-            async for report in self.stream(
-                system, store, seed=seed, terminate=terminate, policy=policy
-            )
-        ]
+        """Name how the run ended. "error" and "quiescence" are the engine's own outcomes
+        (halted on a failure / nothing armed); otherwise the run ended on a terminate
+        condition, and re-consulting the list on the final report names the first one that
+        holds — Run.reason is its lowercased class name ("goal", "budget", ...)."""
         status = Status.ERROR if any(s.errors for s in steps) else Status.OK
         last = steps[-1]
-        if self._halt and last.errors:
-            reason: Literal["terminate", "quiescence", "error"] = "error"
+        if halt and last.errors:
+            reason = "error"
         elif not last.fired:
             reason = "quiescence"
         else:
-            reason = "terminate"
-        return Run(status, steps, store.snapshot(), reason)
+            hit = next(t for t in terminate if t.done(last.view, last))
+            reason = type(hit).__name__.lower()
+        return Run(status, steps, store.snapshot(), reason, scope)

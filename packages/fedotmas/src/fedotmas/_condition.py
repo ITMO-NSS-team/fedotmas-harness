@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from fedotmas._inject import bind_pred
 from fedotmas.engine.contract import View
 
-Op = Literal["truthy", "not", "eq", "ne", "gt", "lt", "gte", "lte", "exists"]
+Op = Literal["truthy", "eq", "gt", "gte", "exists"]
 
 
 def _pick(state: Any, key: str) -> Any:
@@ -95,12 +95,12 @@ class Condition(Predicate):
 
     @model_validator(mode="after")
     def _value_matches_op(self) -> Condition:
-        if self.op in ("gt", "lt", "gte", "lte") and self.value is None:
+        if self.op in ("gt", "gte") and self.value is None:
             raise ValueError(
                 f"Condition(key={self.key!r}, op={self.op!r}): an ordered comparison "
                 "needs value="
             )
-        if self.op in ("truthy", "not", "exists") and self.value is not None:
+        if self.op in ("truthy", "exists") and self.value is not None:
             raise ValueError(
                 f"Condition(key={self.key!r}, op={self.op!r}): {self.op} does not "
                 "compare, drop value="
@@ -114,12 +114,8 @@ class Condition(Predicate):
         v = s.get(self.key)
         if self.op == "truthy":
             return bool(v)
-        if self.op == "not":
-            return not v
         if self.op == "eq":
             return v == self.value
-        if self.op == "ne":
-            return v != self.value
         if v is None:
             raise ValueError(
                 f"Condition(key={self.key!r}, op={self.op!r}): the source has no "
@@ -127,11 +123,7 @@ class Condition(Predicate):
             )
         if self.op == "gt":
             return v > self.value
-        if self.op == "lt":
-            return v < self.value
-        if self.op == "gte":
-            return v >= self.value
-        return v <= self.value
+        return v >= self.value
 
     def positive_keys(self) -> list[str]:
         return [self.key]
@@ -199,8 +191,9 @@ def _tags(tags: Sequence[str]) -> Predicate:
 
 def as_condition(spec: Predicate | str | Sequence[str]) -> Predicate:
     """Fold the declarative spellings into one Predicate: a Condition (or its `&`/`|`/`~`
-    composition) passes through, a str is a truthy Condition over that key, a tag sequence is an
-    all-of existence check. The compact list is a wire form too, not just an authoring sugar."""
+    composition) passes through, a str is a truthy Condition over that key (the until=
+    spelling; a board's when= refuses it, see view_predicate), a tag sequence is an all-of
+    existence check. The compact list is a wire form too, not just an authoring sugar."""
     match spec:
         case Predicate():
             return spec
@@ -256,11 +249,18 @@ def state_predicate(
 
 
 def view_predicate(
-    spec: Callable[[View], bool] | Predicate | str | Sequence[str],
+    spec: Callable[[View], bool] | Predicate | Sequence[str],
 ) -> tuple[Callable[[View], bool], Predicate | None]:
     """Compile a view predicate (a board when) to a `(view) -> bool` plus its declarative form
-    (None for an opaque callable)."""
-    if not isinstance(spec, (Predicate, str, Sequence)):
+    (None for an opaque callable). A bare string is refused: `when="x"` would read as truthy
+    over the value while `when=["x"]` is an exists check — spell out `["x"]` or
+    Condition(key="x")."""
+    if isinstance(spec, str):
+        raise TypeError(
+            'when= does not take a bare string: ["x"] means the fact exists, '
+            'Condition(key="x") means its value is truthy'
+        )
+    if not isinstance(spec, (Predicate, Sequence)):
         return spec, None
-    pred = as_condition(cast("Predicate | str | Sequence[str]", spec))
+    pred = as_condition(cast("Predicate | Sequence[str]", spec))
     return (lambda view: pred.check(_View(view))), pred

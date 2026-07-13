@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Generic, TypeVar
 
 from fedotmas._addressing import Branch, Loop
 from fedotmas._condition import Predicate, _pick, state_predicate
 from fedotmas._inject import bind_pred
-from fedotmas._outcome import Outcome
-from fedotmas.engine.contract import Fact, Kind, Node, View
-from fedotmas.engine.executor import ReactiveExecutor
-from fedotmas.engine.report import StepReport
-from fedotmas.engine.store import Store
-from fedotmas.engine.system import System
-from fedotmas.engine.terminate import Budget, Goal, Terminate
+from fedotmas.engine.contract import Kind, Node, View
+from fedotmas.engine.plugin import Plugin, PluginDispatcher
+from fedotmas.engine.system import Compilable, System
+from fedotmas.engine.terminate import Terminate
 from fedotmas.flow._nodes import (
     Ctx,
     _alias_node,
@@ -26,8 +23,9 @@ from fedotmas.flow._nodes import (
 )
 
 if TYPE_CHECKING:
-    from fedotmas.blackboard import Board
+    from fedotmas.engine.outcome import Outcome
     from fedotmas.engine.policy import Policy
+    from fedotmas.engine.report import StepReport
 
 A = TypeVar("A")
 B = TypeVar("B")
@@ -48,25 +46,28 @@ class Flow(Generic[A, B]):
         raise NotImplementedError
 
     def system(
-        self, *, entry: str, out: str, bind: Mapping[str, Any] | None = None
+        self,
+        *,
+        entry: str = "in",
+        out: str = "out",
+        bind: Mapping[str, Any] | None = None,
+        plugins: Sequence[Plugin] | PluginDispatcher = (),
+        policy: Policy | None = None,
+        halt_on_error: bool = True,
     ) -> System:
-        """Compile to a runnable System. `bind` is the run-scoped binding map threaded to every
-        node's builder (e.g. a default backend under "llm"); a node that needs a binding nobody
-        supplied fails here, not mid-run."""
-        ctx = Ctx(bindings=bind or {})
+        """Compile to a runnable System — the Compilable face. A flow is anonymous dataflow,
+        so `entry`/`out` are assigned, not referenced (the defaults are .run's own choice).
+        `bind` is the run-scoped binding map threaded to every node's builder (e.g. a default
+        backend under "llm"); a node that needs a binding nobody supplied fails here, not
+        mid-run. `plugins` are baked into nested boundaries at compile: nest and loop nodes
+        capture the observer face for their inner runs, which is why plugins given only at run
+        time cannot reach inside an already-compiled system. `policy` and `halt_on_error`
+        become the compiled system's own discipline (see System)."""
+        ctx = Ctx(bindings=bind or {}, plugins=PluginDispatcher.of(plugins))
         nodes, last = self._build(ctx, entry)
         if last != out:
             nodes = [*nodes, _alias_node(last, out)]
-        return System(nodes)
-
-    def _prepare(
-        self, bind: Mapping[str, Any] | None, budget: int | None
-    ) -> tuple[System, Terminate]:
-        system = self.system(entry="in", out="out", bind=bind)
-        terminate: Terminate = Goal(lambda v: v.exists("out"))
-        if budget is not None:
-            terminate = terminate | Budget(budget)
-        return system, terminate
+        return System(nodes, policy=policy, halt_on_error=halt_on_error)
 
     async def run(
         self,
@@ -74,25 +75,20 @@ class Flow(Generic[A, B]):
         *,
         bind: Mapping[str, Any] | None = None,
         budget: int | None = 100,
-        policy: Policy | None = None,
-        halt_on_error: bool = True,
+        plugins: Sequence[Plugin] = (),
     ) -> Outcome:
         """Compile and execute the flow on one input. The store, the seed fact, and the
         terminate condition (output produced, capped by `budget` supersteps; the default 100
         is a runaway guard, None lifts the cap) are derived, so the caller holds no tags.
-        `halt_on_error=False` keeps the run going past a failed node; the error still lands
-        in `.errors` and `.ok` stays False. Returns an Outcome: `.value`, `.ok`, `.reason`,
-        `.errors`, and the full `.steps` trace.
+        A selection policy or a lenient error discipline is the system's property: set it
+        through .system(). Returns an Outcome: `.value`, `.ok`, `.reason`, `.errors`, and the
+        full `.steps` trace.
         """
-        system, terminate = self._prepare(bind, budget)
-        run = await ReactiveExecutor(halt_on_error=halt_on_error).run(
-            system,
-            Store(),
-            seed=[Fact(tag="in", value=value)],
-            terminate=terminate,
-            policy=policy,
+        dispatcher = PluginDispatcher.of(plugins)
+        system = self.system(entry="in", out="out", bind=bind, plugins=dispatcher)
+        return await system.run(
+            {"in": value}, goal="out", budget=budget, plugins=dispatcher
         )
-        return Outcome(run, "out")
 
     async def stream(
         self,
@@ -100,17 +96,13 @@ class Flow(Generic[A, B]):
         *,
         bind: Mapping[str, Any] | None = None,
         budget: int | None = 100,
-        policy: Policy | None = None,
-        halt_on_error: bool = True,
+        plugins: Sequence[Plugin] = (),
     ) -> AsyncIterator[StepReport]:
         """The streaming form of .run: yields each StepReport as the run unfolds."""
-        system, terminate = self._prepare(bind, budget)
-        async for report in ReactiveExecutor(halt_on_error=halt_on_error).stream(
-            system,
-            Store(),
-            seed=[Fact(tag="in", value=value)],
-            terminate=terminate,
-            policy=policy,
+        dispatcher = PluginDispatcher.of(plugins)
+        system = self.system(entry="in", out="out", bind=bind, plugins=dispatcher)
+        async for report in system.stream(
+            {"in": value}, goal="out", budget=budget, plugins=dispatcher
         ):
             yield report
 
@@ -201,7 +193,10 @@ class _Loop(Flow[Any, Any]):
         addr = Loop(name)
         state = addr.state
         body_in, body_out = addr.body_in, addr.body_out
-        body = self._body.system(entry=body_in, out=body_out, bind=ctx.bindings)
+        inner = ctx.plugins.nested(name)
+        body = self._body.system(
+            entry=body_in, out=body_out, bind=ctx.bindings, plugins=inner
+        )
         nodes = [
             _loop_iterate_node(
                 name,
@@ -213,6 +208,7 @@ class _Loop(Flow[Any, Any]):
                 until=self._until,
                 pred=self._pred,
                 budget=self._budget,
+                plugins=inner,
             ),
             _loop_finish_node(
                 name, state=state, out=name, until=self._until, pred=self._pred
@@ -325,30 +321,31 @@ def gather(*flows: Flow[A, B]) -> Flow[A, list[B]]:
 class _Nest(Flow[A, B]):
     def __init__(
         self,
-        target: System | Flow[A, B] | Board,
+        target: Flow[A, B] | System | Compilable,
         *,
         entry: str,
         out: str,
-        until: Terminate | None,
+        terminate: Sequence[Terminate],
         budget: int | None,
     ) -> None:
         self._target = target
         self._entry = entry
         self._out = out
-        self._until = until
+        self._terminate = terminate
         self._budget = budget
 
     def _build(self, ctx: Ctx, entry: str) -> tuple[list[Node], str]:
         name = ctx.fresh("nest")
         inner_entry, inner_out = self._entry, self._out
-        if isinstance(self._target, Flow):
-            system = self._target.system(
-                entry=inner_entry, out=inner_out, bind=ctx.bindings
+        inner = ctx.plugins.nested(name)
+        target = self._target
+        system = (
+            target
+            if isinstance(target, System)
+            else target.system(
+                entry=inner_entry, out=inner_out, bind=ctx.bindings, plugins=inner
             )
-        elif isinstance(self._target, System):
-            system = self._target
-        else:  # a Board: thread the flow's run-scoped bindings as its rules' fallback
-            system = self._target.compile(ctx.bindings)
+        )
         nest = _nest_node(
             name,
             system=system,
@@ -356,33 +353,37 @@ class _Nest(Flow[A, B]):
             inner_entry=inner_entry,
             inner_out=inner_out,
             budget=self._budget,
-            until=self._until,
+            terminate=self._terminate,
+            plugins=inner,
         )
         return [nest], name
 
 
 def nest(
-    target: System | Flow[A, B] | Board,
+    target: Flow[A, B] | System | Compilable,
     *,
     entry: str,
     out: str,
-    until: Terminate | None = None,
+    terminate: Sequence[Terminate] = (),
     budget: int | None = 100,
 ) -> Flow[A, B]:
     """Run a whole sub-system as one typed arrow node: its own inner store, run to a goal,
-    one fact out. The boundary is typed and composes; the interior stays opaque. This is
-    how a goal-terminating Board (the blackboard surface) enters the arrow world, and how a
-    flow nests another flow as an isolated unit. A Flow or Board target picks up the outer
-    flow's run-scoped bindings as its fallback; a System is already compiled, so they do not
-    reach inside it. The inner run is the outer node's single superstep, so the
-    outer budget cannot interrupt it; `budget` caps the inner supersteps instead (the default
-    100 is a runaway guard, None lifts it). The inner run always halts on its first error and
-    the failure surfaces as this node's error fact; the outer halt_on_error then decides
-    whether the rest of the system continues. Named nest, not embed, to avoid the embeddings
-    reading.
+    one fact out. The boundary is typed and composes; the interior stays opaque. `target` is
+    a System or anything Compilable — a Flow, a Board, a third-party container exposing
+    `.system(...)` — so this is how a goal-terminating Board (the blackboard surface) enters
+    the arrow world, and how a flow nests another flow as an isolated unit. A Compilable
+    target picks up the outer flow's run-scoped bindings and plugins; a System is already
+    compiled, so they do not reach inside it. The inner run is the outer node's single
+    superstep, so the outer budget cannot interrupt it; `budget` caps the inner supersteps
+    instead (the default 100 is a runaway guard, None lifts it). The inner system runs under
+    its own discipline: a strict one (the default) halts on its first error and the failure
+    surfaces as this node's error fact, while a lenient one (halt_on_error=False) that still
+    reaches `out` counts as success, its errors observable through on_error. The outer
+    halt_on_error then decides whether the rest of the system continues. Named nest, not
+    embed, to avoid the embeddings reading.
 
     Example:
-        research = nest(board, entry="topic", out="report", until=Goal("report"))
+        research = nest(board, entry="topic", out="report")
         pipeline = plan + research + write
     """
-    return _Nest(target, entry=entry, out=out, until=until, budget=budget)
+    return _Nest(target, entry=entry, out=out, terminate=terminate, budget=budget)
